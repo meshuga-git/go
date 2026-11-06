@@ -488,8 +488,9 @@ class Runner:
                 measured[stage.name] = self._read_measurements(
                     logs, stage.name, root)
             if done.returncode != 0:
-                tail = done.stderr.decode("utf-8", "replace")[-2000:]
+                tail = done.stderr.decode("utf-8", "replace")[-3000:]
                 print(f"    stderr tail:\n{tail}", flush=True)
+                result["failure"] = {"stage": stage.name, "stderr": tail}
                 break
         files = snapshot(root)
         normalizer = Normalizer(root, files)
@@ -605,7 +606,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="parent folder for the scenario folders")
     parser.add_argument("--out", type=Path, metavar="FILE",
                         help="also write the results here, in the format "
-                             "of a golden file")
+                             "of a golden file plus the stderr of any "
+                             "failed stage")
     args = parser.parse_args(argv)
 
     key = f"{args.toolchain}-py{sys.version_info[0]}{sys.version_info[1]}"
@@ -648,8 +650,14 @@ def main(argv: list[str] | None = None) -> int:
                       for name, outcome in outcomes.items()},
     }
     if args.out:
+        # Failure logs help diagnose a run on another machine, but
+        # depend on its paths, so golden files leave them out.
+        report = json.loads(json.dumps(stored))
+        for name, outcome in outcomes.items():
+            if "failure" in outcome:
+                report["scenarios"][name]["failure"] = outcome["failure"]
         args.out.parent.mkdir(parents=True, exist_ok=True)
-        args.out.write_text(json.dumps(stored, indent=1) + "\n",
+        args.out.write_text(json.dumps(report, indent=1) + "\n",
                             encoding="utf-8")
     if args.measure:
         lines = {name: len((REPO / name).read_bytes().splitlines())
