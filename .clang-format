@@ -1,0 +1,19 @@
+# Development formatter: clang-format 19.1.7.
+BasedOnStyle: LLVM
+Language: Cpp
+Standard: c++20
+ColumnLimit: 79
+IndentWidth: 4
+ContinuationIndentWidth: 4
+TabWidth: 4
+UseTab: Never
+BreakBeforeBraces: Attach
+NamespaceIndentation: None
+AccessModifierOffset: -4
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+ReflowComments: false
+SortIncludes: CaseSensitive
+IncludeBlocks: Regroup
+# Keep prose at 72 columns; preserve deliberately wrapped Doxygen text.

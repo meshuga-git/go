@@ -1,0 +1,5 @@
+# Keep sources byte-identical on every platform: the golden hashes and
+# the provenance producer hashes depend on the exact bytes.
+* text=auto eol=lf
+*.docx binary
+*.png binary
