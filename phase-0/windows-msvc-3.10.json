@@ -7,7 +7,7 @@
   "pandas": "2.3.3",
   "scipy": "1.15.3",
   "plotly": "7.1.0",
-  "cl": "usage: cl [ option... ] filename... [ /link linkoption... ]",
+  "cl": "Microsoft (R) C/C++ Optimizing Compiler Version 19.44.35229 for x64",
   "g++": "g++ (Rev4, Built by MSYS2 project) 16.2.0"
  },
  "scenarios": {
