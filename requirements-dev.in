@@ -1,0 +1,6 @@
+# Style and compatibility checks (plan task 0.6). Regenerate the pins with
+#   uv pip compile requirements-dev.in --universal --python-version 3.10 -o requirements-dev.txt
+ruff
+pydoclint
+vermin
+clang-format==19.1.7
