@@ -1,0 +1,98 @@
+# Golden tests (plan tasks 0.3 and 0.4): every toolchain the plan names,
+# under Python 3.10 (the version ceiling) and the newest Python.
+# A job compares its results with tests/golden/<key>.json; where no such
+# file exists yet, the job records one and uploads it as an artifact.
+
+name: golden
+
+on:
+  push:
+    branches: [main, "phase-*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  golden:
+    name: ${{ matrix.toolchain }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.14"]
+        toolchain:
+          [linux-gcc, linux-clang, windows-msvc, windows-mingw, macos-clang]
+        include:
+          - toolchain: linux-gcc
+            os: ubuntu-24.04
+          - toolchain: linux-clang
+            os: ubuntu-24.04
+          - toolchain: windows-msvc
+            os: windows-2022
+          - toolchain: windows-mingw
+            os: windows-2022
+          - toolchain: macos-clang
+            os: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      # Both Windows toolchains need MinGW g++: today's clustering.py
+      # builds run_clustering with GNU-style options only.
+      - name: Install MinGW-w64 GCC through MSYS2
+        if: runner.os == 'Windows'
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: mingw-w64-ucrt-x86_64-gcc
+
+      - name: Put MinGW g++ on PATH
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          Add-Content $env:GITHUB_PATH
+          "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin"
+
+      - name: Set up the MSVC developer environment
+        if: matrix.toolchain == 'windows-msvc'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install the pinned packages
+        run: python -m pip install -r requirements.txt
+
+      - name: Run the golden scenarios
+        run: >-
+          python tests/golden.py --toolchain ${{ matrix.toolchain }}
+          --allow-missing
+          --out results/${{ matrix.toolchain }}-${{ matrix.python }}.json
+
+      - name: Upload results and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-${{ matrix.toolchain }}-${{ matrix.python }}
+          path: |
+            results/
+            .golden-work/_logs/
+          if-no-files-found: ignore
+
+  style:
+    name: style report
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install the checkers
+        run: python -m pip install -r requirements-dev.txt
+      - name: Report findings (report-only until the plan makes them binding)
+        run: python tests/check_style.py
