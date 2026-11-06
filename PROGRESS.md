@@ -49,6 +49,11 @@ request into `main`; each task is one commit.
   re-records the timing set.
 - Phase 0: every other scenario gives byte-identical results with GCC
   and Clang under both Python 3.10 and 3.14.
+- Phase 0 baseline (`tests/baselines/linux-gcc-py310.json`): the
+  shared SHA-256 helper runs 1,024 times in the 22-sample variance
+  stage and 10,754 times on the timing set, up to 28 times for one
+  file; Phase 5's gate allows 3 per file per run. On the timing set
+  the variance stage takes 109 s and Tjala 151 s with a 1.2 GiB peak.
 - Phase 0: `build_dendrogram.py` picks colors at random unless given
   `--seed`; the golden harness passes `--seed 7`.
 - Phase 0: today's code reports 21 ruff findings, 68 pydoclint
@@ -65,7 +70,7 @@ request into `main`; each task is one commit.
 | 0.2 | Golden datasets in tests/data/: the 22-sample synthetic set, five random trees whose paths contain commas,... | Done |
 | 0.3 | Golden outputs: the SHA-256 of every artifact the current code writes, per toolchain (MSVC, MinGW GCC,... | In progress |
 | 0.4 | tests/golden.py drives every script non-interactively, feeding its answers on stdin, and compares the hashes. | Done |
-| 0.5 | Baselines: lines per file, wall time and peak memory per stage, and hashes per file per run, using the... | In progress |
+| 0.5 | Baselines: lines per file, wall time and peak memory per stage, and hashes per file per run, using the... | Done |
 | 0.6 | Configure ruff, pydoclint, vermin and clang-format 19.1.7 in report-only mode, pinned in requirements-dev.txt. | Done |
 
 ### Phase 1: Stop the harm
