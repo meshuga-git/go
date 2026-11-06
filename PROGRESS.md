@@ -49,6 +49,18 @@ request into `main`; each task is one commit.
   re-records the timing set.
 - Phase 0: every other scenario gives byte-identical results with GCC
   and Clang under both Python 3.10 and 3.14.
+- Phase 0: on macOS, Apple Clang 17 rejects floating-point
+  `std::from_chars` ("call to deleted function"), so today's
+  `run_clustering.cpp` (line 290) and `reconstruct_hierarchy.cpp` (line
+  287) do not compile and the pipeline cannot run there. The macOS
+  golden files record those build failures as today's behavior. No
+  plan task covers this yet.
+- Phase 0: Windows (MSVC and MinGW-w64 GCC 16) runs every scenario.
+  Its results differ from Linux only in files that hold sample paths
+  and in the provenance records that hash them; the tree, iteration,
+  matrix, variance, Tjala and dendrogram outputs are byte-identical
+  across Linux and Windows. MSVC and MinGW differ only in
+  `compute_variances_state.json`, which names the compiler family.
 - Phase 0 baseline (`tests/baselines/linux-gcc-py310.json`): the
   shared SHA-256 helper runs 1,024 times in the 22-sample variance
   stage and 10,754 times on the timing set, up to 28 times for one
@@ -68,7 +80,7 @@ request into `main`; each task is one commit.
 | --- | --- | --- |
 | 0.1 | Tag the current code as the baseline. Pin the package versions in use in requirements.txt, and record the... | Done |
 | 0.2 | Golden datasets in tests/data/: the 22-sample synthetic set, five random trees whose paths contain commas,... | Done |
-| 0.3 | Golden outputs: the SHA-256 of every artifact the current code writes, per toolchain (MSVC, MinGW GCC,... | In progress |
+| 0.3 | Golden outputs: the SHA-256 of every artifact the current code writes, per toolchain (MSVC, MinGW GCC,... | Done |
 | 0.4 | tests/golden.py drives every script non-interactively, feeding its answers on stdin, and compares the hashes. | Done |
 | 0.5 | Baselines: lines per file, wall time and peak memory per stage, and hashes per file per run, using the... | Done |
 | 0.6 | Configure ruff, pydoclint, vermin and clang-format 19.1.7 in report-only mode, pinned in requirements-dev.txt. | Done |

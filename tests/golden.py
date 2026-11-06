@@ -548,7 +548,9 @@ class Runner:
             try:
                 done = subprocess.run(command, capture_output=True,
                                       text=True, errors="replace")
-                text = (done.stdout or done.stderr).strip()
+                # cl prints its banner on stderr and usage on stdout.
+                text = (done.stderr if compiler == "cl"
+                        else done.stdout or done.stderr).strip()
                 info[compiler] = text.splitlines()[0] if text else None
             except OSError:
                 info[compiler] = None
