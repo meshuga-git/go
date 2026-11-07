@@ -187,3 +187,17 @@ def test_1_12_duplicate_excel_header_is_rejected(tmp_path: Path) -> None:
     source = tmp_path / "matrix.xlsx"
     workbook.save(source)
     _assert_duplicate_rejected(clustering, source)
+
+
+def test_1_9_par_y_genes_stay_distinct(tmp_path: Path) -> None:
+    """Task 1.9: stripping versions keeps _PAR_Y IDs apart."""
+    clustering = _load("clustering")
+    source = tmp_path / "matrix.csv"
+    source.write_text(
+        "gene,S1\nENSG00000182378.14,5\nENSG00000182378.14_PAR_Y,0\n"
+        "ENSG00000000003.15,7\n", encoding="utf-8")
+    table = clustering._load_dataframe(str(source),
+                                       clustering.FILE_READERS[".csv"])
+    clustering._normalize_expression_columns(table, str(source))
+    assert table["gene"].tolist() == [
+        "ENSG00000182378", "ENSG00000182378_PAR_Y", "ENSG00000000003"]

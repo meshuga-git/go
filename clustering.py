@@ -57,6 +57,8 @@ DISTANCE_METRICS: dict[str, str] = {
 OUTPUT_EXTENSION = ".csv"
 
 _ITERATION_FILE_RE = re.compile(r"^iter([1-9]\d*)\.txt$")
+# A gene ID's trailing .version, before an optional GENCODE _PAR_Y.
+_GENE_VERSION_RE = re.compile(r"\.[0-9]+(?=(?:_PAR_Y)?\Z)")
 
 Reader = Callable[[str], pd.DataFrame]
 
@@ -453,9 +455,10 @@ def _normalize_expression_columns(
     """
     _validate_input_dataframe(dataframe, file_path)
     expression_columns = [str(col) for col in dataframe.columns[1:]]
-    normalized = (
-        [str(value).split(".", 1)[0] for value in dataframe.iloc[:, 0]]
-    )
+    # Only the version goes: ENSG00000182378.14_PAR_Y becomes
+    # ENSG00000182378_PAR_Y and stays distinct from its chrX twin.
+    normalized = [_GENE_VERSION_RE.sub("", str(value), count=1)
+                  for value in dataframe.iloc[:, 0]]
     seen: set[str] = set()
     for number, gene in enumerate(normalized, 2):
         validate_identifier(gene, source=f"{file_path}:{number}:1")
