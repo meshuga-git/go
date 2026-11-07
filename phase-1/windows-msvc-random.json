@@ -1,12 +1,12 @@
 {
  "key": "windows-msvc-min",
  "environment": {
-  "python": "3.12.10",
+  "python": "3.14.10",
   "platform": "Windows-2022Server-10.0.20348-SP0",
-  "numpy": "1.26.2",
-  "pandas": "2.3.3",
-  "scipy": "1.16.0",
-  "plotly": "6.5.1",
+  "numpy": "2.5.4",
+  "pandas": "3.0.3",
+  "scipy": "1.17.1",
+  "plotly": "5.22.0",
   "cl": "Microsoft (R) C/C++ Optimizing Compiler Version 19.44.35229 for x64",
   "g++": "g++ (Rev4, Built by MSYS2 project) 16.2.0"
  },
@@ -95,8 +95,8 @@
     "data/noncancer_parsed_data/parsed_data.provenance": "5764d90e40d46199c52f4de94b585ae7d4d35260466525066e54526a573e452a",
     "data/noncancer_parsed_files.txt": "d4d0e4da539e747199bf0fb2b31d86ba19647cdf8aad4d219b9e85e0a42bbd96",
     "data/noncancer_parsed_files.txt.provenance": "09fe6a75799387a130e2a6d158bc6d2e48c90212449b4a6a74fa51d1b16d0d90",
-    "dendrogram.html": "1b9a3bc6b1bd634a56a7f69a0e93eeaa0e4e84cb8387105a441e85c76b594b82",
-    "dendrogram.html.provenance": "4d0942ce7442f48015488f7258e02c985b4b6ad5070b470ee987c50891ad2bbc",
+    "dendrogram.html": "787bd91a64f4af8c27b5c77f0df704ea98fca03a664d84cdebe2bd44d1ec9fa6",
+    "dendrogram.html.provenance": "92b06c1074f2428ab398dd1780150c2651dabf6fcd1c02c05673988a57919127",
     "must_links.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "must_links.txt.provenance": "037b6414bf65d1d24f0a044f04a72c10a2d8cb7935c3187e93c72483dfbfb207",
     "no_links.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -167,8 +167,8 @@
     "data/noncancer_parsed_data/parsed_data.provenance": "5764d90e40d46199c52f4de94b585ae7d4d35260466525066e54526a573e452a",
     "data/noncancer_parsed_files.txt": "d4d0e4da539e747199bf0fb2b31d86ba19647cdf8aad4d219b9e85e0a42bbd96",
     "data/noncancer_parsed_files.txt.provenance": "09fe6a75799387a130e2a6d158bc6d2e48c90212449b4a6a74fa51d1b16d0d90",
-    "dendrogram.html": "ecf75c912379627c748df7816eb9b31c813344ee06bbfe4f717cd2b5cb52f044",
-    "dendrogram.html.provenance": "db706f9efb7dfd1bb575558c78dcbfaa50b023987da6a185a98db2f0fa325ba0",
+    "dendrogram.html": "8b71b9f09f337f07cd04dd8b45b50c1893cab1cc087eacb3e8fa555b10033763",
+    "dendrogram.html.provenance": "598ddb33f17349dd2be06f3add38db3e2b12ed67af61c9099709d708d21bf0b5",
     "must_links.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "must_links.txt.provenance": "037b6414bf65d1d24f0a044f04a72c10a2d8cb7935c3187e93c72483dfbfb207",
     "no_links.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -239,8 +239,8 @@
     "data/noncancer_parsed_data/parsed_data.provenance": "5764d90e40d46199c52f4de94b585ae7d4d35260466525066e54526a573e452a",
     "data/noncancer_parsed_files.txt": "d4d0e4da539e747199bf0fb2b31d86ba19647cdf8aad4d219b9e85e0a42bbd96",
     "data/noncancer_parsed_files.txt.provenance": "09fe6a75799387a130e2a6d158bc6d2e48c90212449b4a6a74fa51d1b16d0d90",
-    "dendrogram.html": "37a306e1bff5dffc2eaa9cea5e1e576e3982d87d38687322a39d339f2cd29f06",
-    "dendrogram.html.provenance": "08531d62ed06e7accf15178e8cead70a9299c375f7f10fc0442c3568a1b6771e",
+    "dendrogram.html": "55e7b75719799b837ce4c47ab7b71f051e4071931222ceb6f3267e9987272164",
+    "dendrogram.html.provenance": "130edd5a3a3de97e51c0469be93481cacac1d51c0c4d1acbbc56130746bf2093",
     "must_links.txt": "88b241863beae803622a917c3ad1075ec435135d451092cb4cbfa0c2cdf543db",
     "must_links.txt.provenance": "fcf71926bd7528ea18e2ff1f136fd5eb8c2593dca6b264c76f07ba81d7b60c0c",
     "no_links.txt": "56579f6a207b3b8b0f97df0dcda86e147d51b8cf034e7a1d804cb847069e46fa",
@@ -284,8 +284,8 @@
     "data/noncancer_parsed_data/parsed_data.provenance": "5764d90e40d46199c52f4de94b585ae7d4d35260466525066e54526a573e452a",
     "data/noncancer_parsed_files.txt": "d4d0e4da539e747199bf0fb2b31d86ba19647cdf8aad4d219b9e85e0a42bbd96",
     "data/noncancer_parsed_files.txt.provenance": "09fe6a75799387a130e2a6d158bc6d2e48c90212449b4a6a74fa51d1b16d0d90",
-    "dendrogram.html": "86354f37409f05ac4b0f9424c78f738953be39dee5ac3d6c4f900293acbb7806",
-    "dendrogram.html.provenance": "24c9d3e68b0d3451997603fa0911b0b1d0a6402e6c58081b24e9b6f506835d83",
+    "dendrogram.html": "2eb999990a4919bf2479826dfde138a174e5abf13b8d059651f626cef9655223",
+    "dendrogram.html.provenance": "c7435e48db4a643f1be92406e57a124f47148b3f80000c6c8395b39f204c4664",
     "must_links.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "must_links.txt.provenance": "037b6414bf65d1d24f0a044f04a72c10a2d8cb7935c3187e93c72483dfbfb207",
     "no_links.txt": "56579f6a207b3b8b0f97df0dcda86e147d51b8cf034e7a1d804cb847069e46fa",
@@ -365,8 +365,8 @@
     "data/noncancer_parsed_data/parsed_data.provenance": "5764d90e40d46199c52f4de94b585ae7d4d35260466525066e54526a573e452a",
     "data/noncancer_parsed_files.txt": "d4d0e4da539e747199bf0fb2b31d86ba19647cdf8aad4d219b9e85e0a42bbd96",
     "data/noncancer_parsed_files.txt.provenance": "09fe6a75799387a130e2a6d158bc6d2e48c90212449b4a6a74fa51d1b16d0d90",
-    "dendrogram.html": "1b9a3bc6b1bd634a56a7f69a0e93eeaa0e4e84cb8387105a441e85c76b594b82",
-    "dendrogram.html.provenance": "4d0942ce7442f48015488f7258e02c985b4b6ad5070b470ee987c50891ad2bbc",
+    "dendrogram.html": "787bd91a64f4af8c27b5c77f0df704ea98fca03a664d84cdebe2bd44d1ec9fa6",
+    "dendrogram.html.provenance": "92b06c1074f2428ab398dd1780150c2651dabf6fcd1c02c05673988a57919127",
     "must_links.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "must_links.txt.provenance": "037b6414bf65d1d24f0a044f04a72c10a2d8cb7935c3187e93c72483dfbfb207",
     "no_links.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -387,8 +387,8 @@
     "clustering_results/cluster_0_hier_1.txt.provenance": "a086eb92624ca981ef88f2538a9cdcf7ba97ad1d54ba477cf86197cb1b944ea5",
     "clustering_results/total_data.csv": "57b54381768f035c9bf9568f2a9a8534d2217ef6c6c743e1ebcf767c5511f200",
     "clustering_results/total_data.csv.provenance": "15f0bf810d6d2b0a92100bcfa6622da659457e4cbfdce30a7b8d07991b66e387",
-    "dendrogram.html": "91a3f4ec57797381e5f63928934037f4240d1ad318bb6b4080a9b08d37a054e5",
-    "dendrogram.html.provenance": "55bd6f73f23b6aefb48eadc0eb351985c5d1a8db998c39a304d038b9f044d271"
+    "dendrogram.html": "a6e19940621a26801b79a6cf7c12711d4af58a17fde069f842b5f2b4e3f9532b",
+    "dendrogram.html.provenance": "8f715a6cf93666817dadcb4e9f85aa7b0213fc0fa34e58aa0cf60f73f89a03b8"
    }
   },
   "tree2": {
@@ -405,8 +405,8 @@
     "clustering_results/cluster_0_hier_1.txt.provenance": "8690f4f37b4596d32ae58f983642480500236e20e8d86e9ae9dfb70421e49437",
     "clustering_results/total_data.csv": "baec287241482fdb299070027bade313f139f960e0d44374b810fde5a38178f4",
     "clustering_results/total_data.csv.provenance": "54de5b6c030af85bf8afe6f3774f5cba9f342e6e92ca7ca19207624d289f946b",
-    "dendrogram.html": "c55eca2a4106109a1a401bf6fb428f2432140f9e3b8e9ccdb598d3a9705cef8d",
-    "dendrogram.html.provenance": "9b8558c8e5095fb7903557c8ec83e6a1fe9d0262a048228e9216676b806838d9"
+    "dendrogram.html": "561a5a77449644c795f96206a75432030eda4d662f5d91a5e629d593c59ed754",
+    "dendrogram.html.provenance": "5ab116856d8451d7dc549b687405a246baad2e72c152d0f3353ea8154d522bc8"
    }
   },
   "tree3": {
@@ -423,8 +423,8 @@
     "clustering_results/cluster_0_hier_1.txt.provenance": "dcefa338f5705b5ce80b6d72e9bbf3851060917ea544e5b474add5e7ee87491c",
     "clustering_results/total_data.csv": "d50ebf5eee41b8b5dae0d2d8bba3e0a1eed2c2dfbcf2e8e6a733a577510e487c",
     "clustering_results/total_data.csv.provenance": "69593c684ec04983acfcefd81f63562aeb1e075118d554027a264b8c5b16eb21",
-    "dendrogram.html": "dace9b1c289c219cd9def84454aa2e9b1fcfc07fdd601b78eda46204de05b8b9",
-    "dendrogram.html.provenance": "63e9c372a884b39504d9f4724ca4abbf367e9b47bebdddfa630bfa7c50faf021"
+    "dendrogram.html": "bedb7e09a78ec6a1948700b659beb32e4cefabd27d11c083d64a44fb6aea8c26",
+    "dendrogram.html.provenance": "68fa2b4713cf18c6fcd468d75cd9b7f6279b8d4ee704fbd2059f3f85cf84be38"
    }
   },
   "tree4": {
@@ -441,8 +441,8 @@
     "clustering_results/cluster_0_hier_1.txt.provenance": "f5d942560bbe00ab630181eae6e1a7a57516f200a7ac4bfcab4db0ec98f260d4",
     "clustering_results/total_data.csv": "f6edcf17e5f34e1caf22cf72d50b12762378e7544ddd37362b3fcad39963fe41",
     "clustering_results/total_data.csv.provenance": "4fbd9a6e417986806cc79052d20d58a9f9a69b40773ad76b527bd03cc94f53ed",
-    "dendrogram.html": "39bcbfe98033f8b8e7cc1eac083ef33f2cdafb5d0ed8854152b55249e0185750",
-    "dendrogram.html.provenance": "561e55eac7e452540f33474a1255dd8cd7e5b1ac0a1c44dff73e2bc8df0e3a44"
+    "dendrogram.html": "86d91274b1e0a14752d52d7008edc632a440244557dd7a2a665605cbe9ab366e",
+    "dendrogram.html.provenance": "ca3e68255bee7464c4632d7b80d55aa41f96685495fbb1aa416588b92c322782"
    }
   },
   "tree5": {
@@ -459,8 +459,8 @@
     "clustering_results/cluster_0_hier_1.txt.provenance": "577b4bc92a571899eb267b6493944ffa3cfacb1e3a4f985fb4b555b7857a01fd",
     "clustering_results/total_data.csv": "1329f1cfa9743fa0b0d13bfab4456cdd2b42847a443aa45a76c6bf1490bd2667",
     "clustering_results/total_data.csv.provenance": "f7fb9d4d8f908be272951c406859b5f1c781cebe2d42c2f2ec86b11c15e5679a",
-    "dendrogram.html": "6a895007162c26a3f5efb9f785075492300ef0e4116c14c87d8eb795ca45a8d6",
-    "dendrogram.html.provenance": "4b81d75d048c4f846476cf4f04e2a22780ec038959d30d00290661270722f7de"
+    "dendrogram.html": "895879513cbb9a5ccd6667e6b8915c3fd3f95e3daa6ca02d8bbb125b2a4e20e3",
+    "dendrogram.html.provenance": "78487236ae9634a10ab5a9e62b179d4d62b3c28b39e6cc56e43c69853d19bbf4"
    }
   },
   "timing300": {
@@ -1103,8 +1103,8 @@
     "data/noncancer_parsed_data/parsed_data.provenance": "73a4c8d13831b94b6e96bf3530d964b61b970645b7653a03f3d0dd542725b9b8",
     "data/noncancer_parsed_files.txt": "59f318b852e23cb290c303ab2f14202f6395c52885ba7311db688a76a4390d9b",
     "data/noncancer_parsed_files.txt.provenance": "5441dae7b92eb21a24ae277c6a8e1effb75ef57b78333f3645fcfb2e7ac8b05c",
-    "dendrogram.html": "8e40c3933370e6ae6365a06827a23aa52863482d395cbbf78e0441c91f4d5c63",
-    "dendrogram.html.provenance": "81335eba0e34ad744af8cddd671fc472c4a2f92b5f91aac08a6a1bf8154658ec",
+    "dendrogram.html": "7e380f7473a3e2612c3379147575e513a10be3c70ac631f7f217d75170bb839c",
+    "dendrogram.html.provenance": "1148cb972f4e8dd6947285d69c552cf0077fc3336bb4939f1326052bdcfdf485",
     "must_links.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "must_links.txt.provenance": "037b6414bf65d1d24f0a044f04a72c10a2d8cb7935c3187e93c72483dfbfb207",
     "no_links.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
