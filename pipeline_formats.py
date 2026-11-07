@@ -3,11 +3,14 @@
 Requires Python 3.10 or newer, with NumPy and pandas.
 
 Each format has one reader and one writer here, with the content
-checks its producer guarantees: the per-sample CSVs, the tree topology,
-the snapshots (iterK.txt), the compressed history (total_data.csv),
-the sample lineages, the expression matrix, Tjala's signature report
-and the cannot-cluster list. The Python writer of the history produces
-the bytes reconstruct_hierarchy writes today.
+checks its producer guarantees: the per-sample CSVs, the sample paths
+(filenames.txt), the tree topology, the snapshots (iterK.txt), the
+compressed history (total_data.csv), the sample lineages, the
+expression matrix, the term variances, Tjala's signature report and
+the cannot-cluster list. Where the native programs still write a
+format (the paths, topology, snapshots and term variances), only its
+reader is here. The Python writer of the history produces the bytes
+reconstruct_hierarchy writes today.
 """
 
 from __future__ import annotations
@@ -389,6 +392,31 @@ def render_sample_expression(
 _SNAPSHOT_RE = re.compile(r"(?:0|[1-9][0-9]*)(?: (?:0|[1-9][0-9]*))*\Z")
 
 
+def read_sample_paths(path: Path) -> list[str]:
+    """Read ``filenames.txt``: one sample path per line, in order.
+
+    Args:
+        path: The file.
+
+    Returns:
+        The literal paths.
+
+    Raises:
+        ValueError: If the file is empty or blank, or a path's last
+            component is not a valid sample ID or repeats one.
+        OSError: If the file cannot be read.
+    """
+    paths = read_utf8_lines(path)
+    seen: set[str] = set()
+    for number, raw in enumerate(paths, 1):
+        sid = sample_id(raw)
+        validate_identifier(sid, source=f"{path}:{number}")
+        if sid in seen:
+            raise ValueError(f"{path}:{number}: duplicate sample ID {sid!r}")
+        seen.add(sid)
+    return paths
+
+
 def read_snapshots(directory: Path) -> tuple[list[str], np.ndarray]:
     """Read every snapshot of a clustering run and check it.
 
@@ -408,7 +436,7 @@ def read_snapshots(directory: Path) -> tuple[list[str], np.ndarray]:
             topology.
         OSError: If a file cannot be read.
     """
-    paths = read_utf8_lines(directory / SAMPLE_PATHS_FILE)
+    paths = read_sample_paths(directory / SAMPLE_PATHS_FILE)
     count = len(paths)
     topology = read_tree_topology(directory / TREE_TOPOLOGY_FILE, count)
     states = np.zeros((count, count), dtype=np.int32)
@@ -679,6 +707,60 @@ def write_matrix_values(path: Path, values: np.ndarray) -> None:
         raise ValueError("matrix values must lie within the int32 range")
     pd.DataFrame(array).to_csv(path, header=False, index=False, sep=" ",
                                lineterminator="\n")
+
+
+#: Operator codes of ``term_variances.txt``: equality, ``<`` and ``>``.
+VARIANCE_OPERATORS = {0: "==", 1: "<", 2: ">"}
+
+
+def read_term_variances(path: Path, genes: Iterable[str]) -> pd.DataFrame:
+    """Read ``term_variances.txt`` and check every record.
+
+    The native variance engine writes one record per term: the gene,
+    an integer threshold, an operator code from ``VARIANCE_OPERATORS``
+    and a nonnegative variance, separated by single spaces. No term
+    repeats. Task 4.2 removes the file.
+
+    Args:
+        path: ``term_variances.txt`` path.
+        genes: Gene identifiers from ``matrix_genes.txt``.
+
+    Returns:
+        Columns ``gene``, ``value``, ``operator`` (the integer code)
+        and ``variance``, in file order. The numbers are converted by
+        pandas, as Tjala has always converted them, so that its results
+        do not move.
+
+    Raises:
+        ValueError: If a record breaks a rule above.
+        OSError: If the file cannot be read.
+    """
+    known = set(genes)
+    rows: list[list[str]] = []
+    seen: set[tuple[str, int, int]] = set()
+    for number, line in enumerate(read_utf8_lines(path), 1):
+        fields = line.split(" ")
+        if len(fields) != 4:
+            raise ValueError(f"{path}:{number}: expected four variance fields")
+        gene, threshold, operator, variance = fields
+        value = parse_canonical_int(threshold, source=f"{path}:{number}:2")
+        code = parse_canonical_int(operator, source=f"{path}:{number}:3")
+        statistic = parse_decimal_float(variance, source=f"{path}:{number}:4")
+        key = (gene, value, code)
+        if (gene not in known or code not in VARIANCE_OPERATORS
+                or statistic < 0):
+            raise ValueError(f"{path}:{number}: invalid variance term")
+        if key in seen:
+            raise ValueError(f"{path}:{number}: duplicate variance term")
+        seen.add(key)
+        rows.append(fields)
+    table = pd.DataFrame(rows, columns=["gene", "value", "operator",
+                                        "variance"])
+    table["gene"] = table["gene"].astype(str)
+    for column in ("value", "variance", "operator"):
+        table[column] = pd.to_numeric(table[column], errors="coerce")
+    table["operator"] = table["operator"].astype(np.int64)
+    return table
 
 # ======================================================================
 # Tjala's signature report (tjala_output.txt)

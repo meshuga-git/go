@@ -43,6 +43,7 @@ from pipeline_formats import (
     SampleLineages,
     load_tree_states,
     read_sample_expression,
+    read_term_variances,
     render_sample_lineages,
     sample_id,
     tree_node_count,
@@ -62,8 +63,6 @@ from pipeline_io import (
     TREE_TOPOLOGY_FILE,
     invalidate_dependents,
     is_blank,
-    parse_canonical_int,
-    parse_decimal_float,
     provenance_path,
     read_identifiers,
     read_utf8_lines,
@@ -1367,22 +1366,8 @@ def validate_variance_output(path: Path, out_dir: Path) -> None:
             invalid.
         OSError: If an input cannot be read.
     """
-    genes = set(read_identifiers(out_dir / MATRIX_GENES_FILE, label="gene"))
-    seen: set[tuple[str, int, int]] = set()
-    for number, line in enumerate(read_utf8_lines(path), 1):
-        fields = line.split(" ")
-        if len(fields) != 4:
-            raise ValueError(f"{path}:{number}: expected four variance fields")
-        gene, threshold, operator, variance = fields
-        value = parse_canonical_int(threshold, source=f"{path}:{number}:2")
-        code = parse_canonical_int(operator, source=f"{path}:{number}:3")
-        statistic = parse_decimal_float(variance, source=f"{path}:{number}:4")
-        key = (gene, value, code)
-        if gene not in genes or code not in {0, 1, 2} or statistic < 0:
-            raise ValueError(f"{path}:{number}: invalid variance term")
-        if key in seen:
-            raise ValueError(f"{path}:{number}: duplicate variance term")
-        seen.add(key)
+    read_term_variances(
+        path, read_identifiers(out_dir / MATRIX_GENES_FILE, label="gene"))
 
 
 def _prepare_stage(args: argparse.Namespace, out_dir: Path) -> None:

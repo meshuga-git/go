@@ -53,12 +53,11 @@ request into `main`; each task is one commit.
 - `pipeline_io.py` imports only the standard library: constants and
   artifact owners, UTF-8 and CSV transport, machine grammar, the hash
   memo, today's provenance code and one atomic writer. Since task 2.4
-  every script imports from the core modules directly; `tjala.py`
-  still imports `validate_variance_output` from `compute_variances.py`
-  until task 4.2 removes it. The console prompt moved into
-  `pipeline_io.py` in 2.4, so that no script depends on
-  `compute_variances.py` for it; task 3.1 moves prompting into
-  `pipeline_cli.py`.
+  every script imports from the core modules directly (Tjala's import
+  of `validate_variance_output` went in 2.8, with the term-variance
+  reader). The console prompt moved into `pipeline_io.py` in 2.4, so
+  that no script depends on `compute_variances.py` for it; task 3.1
+  moves prompting into `pipeline_cli.py`.
 - Task 2.4 routes the five format writers through pipeline_formats
   (the lineages, matrix and identifier lists of the variance
   preparation, Tjala's report, the cannot-cluster list and the
@@ -161,6 +160,18 @@ request into `main`; each task is one commit.
   semicolons and ASCII whitespace; a no-break space or any other
   Unicode whitespace is content that the format then rejects. Report
   thresholds have used the canonical integer grammar since 2.4.
+- Task 2.8: `tests/unit/` covers every shared format, the C++ grammar
+  (a harness includes each program's source and feeds its parsers the
+  tokens pipeline_io sees) and the history writer against
+  `reconstruct_hierarchy` on random trees of 2 to 300 samples. The
+  boundary self-test lists every text read left in the stage scripts
+  with the reason it is not a pipeline format. Writing it found two
+  formats still parsed outside the core, so their readers moved into
+  pipeline_formats in the same commit: `term_variances.txt` (Tjala and
+  the variance stage; `read_term_variances` keeps converting numbers
+  with pandas, as Tjala always has, so its results do not move) and
+  `filenames.txt` (`read_sample_paths`, used by the snapshot reader and
+  clustering.py). Tjala no longer imports compute_variances.py.
 - Part 2 runs from copies in `clustering_results`, so the README's copy
   list and the golden harness's `PACKAGE` and `PART2` lists gain the
   core modules.
@@ -269,7 +280,7 @@ request into `main`; each task is one commit.
 | 2.5 | Make producer a required argument of the manifest writer. | Done |
 | 2.6 | Replace repeated literals with the constants: clustering_results, the parsed-data suffixes, .provenance,... | Done |
 | 2.7 | Delete the 10 unused imports and the if True: blocks. | Done |
-| 2.8 | Unit tests for every shared format and grammar: report round trip, Python–C++ grammar agreement, and the... | Not started |
+| 2.8 | Unit tests for every shared format and grammar: report round trip, Python–C++ grammar agreement, and the... | Done |
 | 2.9 | Strengthen the format checks: each lineage must follow real parent–child links in the topology and end at... | Done |
 | 2.10 | Make writer and readers agree: each format splits on the exact ASCII separator it names and rejects other... | Done |
 

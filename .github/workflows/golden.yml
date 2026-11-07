@@ -170,7 +170,7 @@ jobs:
           exit 1
 
   regression:
-    name: regression tests / ${{ matrix.toolchain }}
+    name: regression and unit tests / ${{ matrix.toolchain }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
@@ -209,8 +209,8 @@ jobs:
           python -m pip install uv
           python -m uv pip install --system --resolution lowest-direct --only-binary :all: -r requirements.txt
           python -m pip install pytest openpyxl
-      - name: Run the regression tests
-        run: python -m pytest -p no:cacheprovider tests/regression
+      - name: Run the regression and unit tests
+        run: python -m pytest -p no:cacheprovider tests/regression tests/unit
 
   style:
     name: style report

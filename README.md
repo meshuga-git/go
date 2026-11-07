@@ -202,7 +202,6 @@ clustering and Tjala mathematical objectives, split rules, tie-breaking,
 heuristic fallback, search defaults, and threshold conversion are unchanged.
 Shared Python code lives in `pipeline_io.py`, `pipeline_formats.py` and
 `pipeline_native.py`; keep all three beside every Python script.
-`tjala.py` also needs `compute_variances.py` beside it.
 The native files contain matching local I/O utilities and require C++20.
 Their artifact filenames are defined once in `pipeline_files.hpp`; keep that
 header beside every C++ source when compiling.

@@ -69,6 +69,21 @@ The 22-sample set has three genes only in each cohort, one gene that is
 zero everywhere, and two identical samples. `data/make_cohorts.py` and
 `data/make_trees.py` generate every dataset from fixed seeds.
 
+## Regression and unit tests
+
+```text
+python -m pytest -p no:cacheprovider tests/regression tests/unit
+```
+
+`tests/regression/` holds one or more tests per plan task; they build
+the 22-sample workflow with the machine's toolchain, or the one that
+`TAVNIT_TOOLCHAIN` names. `tests/unit/` tests every shared format
+(each writer against its reader), holds the C++ programs' integer and
+decimal grammar to pipeline_io's, compares the Python history writer
+with `reconstruct_hierarchy` byte for byte, and checks that no stage
+script parses a pipeline format outside `pipeline_io.py` and
+`pipeline_formats.py` (`test_core_boundary.py`, Phase 2's exit gate).
+
 ## Baselines
 
 `python tests/golden.py --toolchain linux-gcc --measure FILE` records the

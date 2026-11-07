@@ -16,7 +16,11 @@ from pathlib import Path
 
 import pandas as pd
 
-from pipeline_formats import read_snapshots, render_sample_expression
+from pipeline_formats import (
+    read_sample_paths,
+    read_snapshots,
+    render_sample_expression,
+)
 from pipeline_io import (
     CANNOT_LINKS_FILE,
     CLUSTERING_PROVENANCE_FILE,
@@ -816,7 +820,7 @@ def _validate_clustering_outputs(output_dir: Path) -> (
             the topology.
         OSError: If an output cannot be read.
     """
-    sample_count = len(read_utf8_lines(output_dir / SAMPLE_PATHS_FILE))
+    sample_count = len(read_sample_paths(output_dir / SAMPLE_PATHS_FILE))
     expected_iterations = set(range(1, sample_count))
     actual_iterations = {
         int(match.group(1))

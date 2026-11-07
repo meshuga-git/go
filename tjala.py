@@ -22,7 +22,6 @@ from typing import Any, TypedDict, cast
 import numpy as np
 import pandas as pd
 
-from compute_variances import validate_variance_output
 from pipeline_formats import (
     RUN_STOP_LABELS,
     SCALE_FACTORS,
@@ -36,6 +35,7 @@ from pipeline_formats import (
     read_cluster_list,
     read_matrix_values,
     read_sample_lineages,
+    read_term_variances,
     render_antecedent,
     render_signature_report,
     tree_node_count,
@@ -57,7 +57,6 @@ from pipeline_io import (
     publication_unchanged,
     read_identifiers,
     read_provenance,
-    read_utf8_lines,
     sha256_file,
     verify_artifacts,
     write_provenance,
@@ -616,12 +615,7 @@ def load_algorithm_data(
         Path(file_paths["values"]), gene_count, sample_count
     ).astype(np.int32)
 
-    validate_variance_output(Path(file_paths["variances"]), Path(base_path))
-    variance_rows = [
-        line.split(" ")
-        for line in read_utf8_lines(Path(file_paths["variances"]))
-    ]
-    variances = pd.DataFrame(variance_rows)
+    variances = read_term_variances(Path(file_paths["variances"]), genes)
 
     # The lineages must be the ones the history implies (task 2.9).
     history, _ = load_tree_states(Path(base_path) / TREE_STATES_FILE)
@@ -632,78 +626,6 @@ def load_algorithm_data(
         for sample, nodes in lineages.items()
     }
     observed_node_ids = {str(node_id) for node_id in range(node_count)}
-
-    if variances.shape[1] < 4:
-        raise ValueError(
-            "term_variances.txt must have ≥4 columns "
-            "(gene, value, operator, variance)."
-        )
-
-    variances = variances.iloc[:, :4].copy()
-    variances.columns = ["gene", "value", "operator", "variance"]
-    variances["gene"] = variances["gene"].astype(str)
-    variances["value"] = pd.to_numeric(variances["value"], errors="coerce")
-    variances["variance"] = pd.to_numeric(
-        variances["variance"], errors="coerce"
-    )
-    variances["operator"] = pd.to_numeric(
-        variances["operator"], errors="coerce"
-    )
-
-    if variances["value"].isna().any():
-        raise ValueError(
-            "Non-numeric transcription-level values found in "
-            "term_variances.txt."
-        )
-
-    if variances["variance"].isna().any():
-        raise ValueError(
-            "Non-numeric values of variances found in term_variances.txt."
-        )
-
-    if variances["operator"].isna().any():
-        raise ValueError(
-            "Non-numeric operator codes found in term_variances.txt"
-        )
-
-    numeric_variance_data = variances[
-        ["value", "operator", "variance"]
-    ].to_numpy(dtype=np.float64)
-
-    if not np.isfinite(numeric_variance_data).all():
-        raise ValueError(
-            "Non-finite value, operator, or variance detected "
-            "in term_variances.txt."
-        )
-
-    operator_values = variances["operator"].to_numpy(dtype=np.float64)
-
-    if not np.equal(operator_values, np.floor(operator_values)).all():
-        invalid_operator_values = sorted(
-            variances.loc[
-                variances["operator"] != np.floor(variances["operator"]),
-                "operator",
-            ].unique()
-        )
-
-        raise ValueError(
-            "Operator codes must be integers. "
-            f"Invalid values: {invalid_operator_values}."
-        )
-
-    variances["operator"] = variances["operator"].astype(np.int64)
-
-    allowed_operator_codes = {0, 1, 2}
-    invalid_operator_codes = (
-        set(variances["operator"].unique()) - allowed_operator_codes
-    )
-
-    if invalid_operator_codes:
-        raise ValueError(
-            "Unsupported operator codes in term_variances.txt: "
-            f"{sorted(invalid_operator_codes)}. "
-            f"Expected only {sorted(allowed_operator_codes)}."
-        )
 
     # Code 0 denotes equality and is intentionally not used to generate
     # terms.
