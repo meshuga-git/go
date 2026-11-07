@@ -536,7 +536,7 @@ ProvenanceRecord read_provenance(const fs::path& path) {
     }
     static const std::set<std::string> STAGES{
         "ingest", "configuration", "sample_manifest", "clustering",
-        "reconstruct", "prepare", "variances", "terms",
+        "reconstruct", "prepare", "variances", "signatures",
         "cluster_export", "signature_export", "dendrogram"};
     static const std::regex HASH("[0-9a-f]{64}");
     ProvenanceRecord result;
