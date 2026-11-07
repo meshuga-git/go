@@ -73,39 +73,33 @@ DEFAULT_WORK = REPO / ".golden-work"
 PACKAGE = (
     "README.md", "build_dendrogram.py", "clustering.py",
     "compute_variances.cpp", "compute_variances.py", "pipeline_files.hpp",
-    "pipeline_formats.py", "pipeline_io.py", "reconstruct_hierarchy.cpp",
-    "run_clustering.cpp",
+    "pipeline_formats.py", "pipeline_io.py", "pipeline_native.py",
+    "reconstruct_hierarchy.cpp", "run_clustering.cpp",
     "samples_by_cluster.py", "samples_by_signature.py", "tjala.py",
 )
 PART2 = (
     "compute_variances.py", "compute_variances.cpp", "pipeline_files.hpp",
-    "pipeline_formats.py", "pipeline_io.py", "samples_by_cluster.py",
-    "tjala.py",
-    "samples_by_signature.py",
+    "pipeline_formats.py", "pipeline_io.py", "pipeline_native.py",
+    "samples_by_cluster.py", "tjala.py", "samples_by_signature.py",
 )
-BINARY_NAMES = {
-    "run_clustering.out", "run_clustering.exe", "reconstruct_hierarchy",
-    "reconstruct_hierarchy.exe", "compute_variances",
-    "compute_variances.exe",
-}
+# Programs are built in the per-user cache; the variance stage alone
+# publishes a copy of its program, which its provenance names. Any
+# other executable in a work folder is reported as an artifact.
+BINARY_NAMES = {"compute_variances", "compute_variances.exe"}
 BINARY_SUFFIXES = {".obj", ".o", ".pdb", ".ilk", ".exp", ".lib"}
-EXE = ".exe" if os.name == "nt" else ""
 PACKAGES = ("numpy", "pandas", "scipy", "plotly")
 # Artifacts that embed a library, not results; --compat skips them.
 VERSION_DEPENDENT = {"dendrogram.html", "dendrogram.html.provenance"}
 TJALA_SEED = 20261106
 STAGE_TIMEOUT = 3600
 
-# name: (compiler for GNU-style builds, native build style).
+# name: (compiler, given as CXX and --cxx, command-line style).
 TOOLCHAINS = {
     "linux-gcc": ("g++", "gnu"),
     "linux-clang": ("clang++", "gnu"),
     "macos-clang": ("clang++", "gnu"),
     "windows-mingw": ("g++", "gnu"),
-    # Today's clustering.py drives GNU-style compilers only, so this run
-    # builds run_clustering with MinGW g++ and the other programs with
-    # cl, as on a Windows machine with both installed.
-    "windows-msvc": ("g++", "msvc"),
+    "windows-msvc": ("cl", "msvc"),
 }
 
 CANNOT = "data/cancer data/noncancer"
@@ -203,7 +197,7 @@ def part2(genes: str = "None", tjala: str = SMALL_TJALA) -> list[Stage]:
     return [
         Stage("copy_part2", where, "copy-part2"),
         Stage("compute_variances", where, "py",
-              ["compute_variances.py", genes, "--cxx", "{native_cxx}"]),
+              ["compute_variances.py", genes, "--cxx", "{cxx}"]),
         Stage("samples_by_cluster", where, "py", ["samples_by_cluster.py"],
               "1\n1\nN\nExit\n"),
         Stage("tjala", where, "py-seeded", ["tjala.py"], tjala),
@@ -393,8 +387,7 @@ class Runner:
             work: Parent folder of the scenario folders.
             measure: Whether to record time, memory and hash counts.
         """
-        self.cxx, self.native = TOOLCHAINS[toolchain]
-        self.native_cxx = "cl" if self.native == "msvc" else self.cxx
+        self.cxx = TOOLCHAINS[toolchain][0]
         self.work = work
         self.measure = measure
         self.env = dict(os.environ, CXX=self.cxx, PYTHONIOENCODING="utf-8",
@@ -443,17 +436,12 @@ class Runner:
             The command line.
         """
         if stage.kind == "compile":
-            target = "reconstruct_hierarchy"
-            source = target + ".cpp"
-            if self.native == "msvc":
-                return ["cl", "/nologo", "/std:c++20", "/O2", "/EHsc", source,
-                        f"/Fe:{target}.exe"]
-            return [self.cxx, "-std=c++20", "-O2", source, "-o",
-                    target + EXE]
+            return [sys.executable, "pipeline_native.py", "build",
+                    "reconstruct_hierarchy"]
         if stage.kind == "reconstruct":
-            return [str(root / f"reconstruct_hierarchy{EXE}"),
-                    "clustering_results"]
-        args = [a.replace("{native_cxx}", self.native_cxx) for a in stage.args]
+            return [sys.executable, "pipeline_native.py", "run",
+                    "reconstruct_hierarchy", "clustering_results"]
+        args = [a.replace("{cxx}", self.cxx) for a in stage.args]
         hooks = []
         if stage.kind == "py-seeded":
             hooks += ["--seed", str(TJALA_SEED)]
@@ -568,18 +556,17 @@ class Runner:
                 info[package] = module.__version__
             except ImportError:
                 info[package] = None
-        for compiler in sorted({self.cxx, self.native_cxx}):
-            command = [compiler] if compiler == "cl" else [compiler,
-                                                           "--version"]
-            try:
-                done = subprocess.run(command, capture_output=True,
-                                      text=True, errors="replace")
-                # cl prints its banner on stderr and usage on stdout.
-                text = (done.stderr if compiler == "cl"
-                        else done.stdout or done.stderr).strip()
-                info[compiler] = text.splitlines()[0] if text else None
-            except OSError:
-                info[compiler] = None
+        compiler = self.cxx
+        command = [compiler] if compiler == "cl" else [compiler, "--version"]
+        try:
+            done = subprocess.run(command, capture_output=True, text=True,
+                                  errors="replace")
+            # cl prints its banner on stderr and usage on stdout.
+            text = (done.stderr if compiler == "cl"
+                    else done.stdout or done.stderr).strip()
+            info[compiler] = text.splitlines()[0] if text else None
+        except OSError:
+            info[compiler] = None
         return info
 
 

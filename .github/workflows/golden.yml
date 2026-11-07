@@ -74,10 +74,8 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
-      # Both Windows toolchains need MinGW g++: today's clustering.py
-      # builds run_clustering with GNU-style options only.
       - name: Install MinGW-w64 GCC through MSYS2
-        if: runner.os == 'Windows'
+        if: matrix.toolchain == 'windows-mingw'
         id: msys2
         uses: msys2/setup-msys2@v2
         with:
@@ -86,12 +84,14 @@ jobs:
           install: mingw-w64-ucrt-x86_64-gcc
 
       - name: Put MinGW g++ on PATH
-        if: runner.os == 'Windows'
+        if: matrix.toolchain == 'windows-mingw'
         shell: pwsh
         run: >-
           Add-Content $env:GITHUB_PATH
           "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin"
 
+      # Every program builds with cl here, from a Developer prompt;
+      # the regression job finds Visual Studio through vswhere instead.
       - name: Set up the MSVC developer environment
         if: matrix.toolchain == 'windows-msvc'
         uses: ilammy/msvc-dev-cmd@v1

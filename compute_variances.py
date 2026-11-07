@@ -30,7 +30,6 @@ import json
 import logging
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -98,6 +97,12 @@ from pipeline_io import (  # noqa: F401
     verify_provenance,
     write_provenance,
     write_text_atomically,
+)
+from pipeline_native import (
+    EXE_SUFFIX,
+    build_program,
+    find_compiler,
+    run_program,
 )
 
 LOGGER = logging.getLogger("compute_variances")
@@ -1011,85 +1016,19 @@ def _invalidate_untrusted_variance(out_dir: Path,
 # ======================================================================
 # Block 5: Native Build and Execution
 # ======================================================================
-def _resolve_compiler(explicit_cxx: str | None) -> str:
-    """Resolve requested or automatically discovered C++ compiler.
-
-    Resolve the requested or automatically discovered C++ compiler.
-
-    Args:
-        explicit_cxx: Compiler executable supplied by ``--cxx``.
-
-    Returns:
-        Resolved compiler executable path/name.
-
-    Raises:
-        RuntimeError: If no supported compiler executable can be found.
-    """
-    requested = explicit_cxx or os.environ.get("CXX")
-    if requested:
-        resolved = shutil.which(requested)
-        if resolved is not None:
-            return resolved
-        candidate = Path(requested)
-        if candidate.is_file():
-            if os.name != "nt" and not os.access(candidate, os.X_OK):
-                raise RuntimeError(
-                    f"Requested C++ compiler is not executable: {requested}"
-                )
-            return str(candidate.resolve())
-        raise RuntimeError((
-            f'Requested C++ compiler was not found: '
-            f'{requested}'
-        ))
-
-    candidates = (
-        ("cl", "clang-cl", "g++", "clang++", "c++")
-        if os.name == "nt"
-        else ("c++", "g++", "clang++")
-    )
-    for candidate in candidates:
-        resolved = shutil.which(candidate)
-        if resolved is not None:
-            return resolved
-
-    if os.name == "nt":
-        raise RuntimeError(
-            "No supported C++ compiler found. Use a Visual Studio Developer "
-            "Command Prompt for cl.exe, install MinGW/LLVM, or pass --cxx."
-        )
-    raise RuntimeError(
-        (
-            'No C++ compiler found. Install g++ or clang++, '
-            'set CXX, or pass --cxx.'
-        )
-    )
-
-
-def _compiler_family(cxx: str) -> str:
-    """Classify a compiler driver as GNU-style or MSVC-style.
-
-    Args:
-        cxx: Resolved compiler executable.
-
-    Returns:
-        ``"msvc"`` for ``cl``/``clang-cl`` and ``"gnu"`` otherwise.
-    """
-    name = Path(cxx).name.lower()
-    if name in {"cl", "cl.exe", "clang-cl", "clang-cl.exe"}:
-        return "msvc"
-    return "gnu"
-
-
 def build_native_binary(
     source: Path,
     out_dir: Path,
     *,
     explicit_cxx: str | None = None,
 ) -> Path:
-    """Compile and publish the native variance executable.
+    """Build the native variance executable and publish it.
 
-    GCC/MinGW and ``clang++`` use GNU-style flags. MSVC ``cl.exe`` and
-    ``clang-cl`` use MSVC-style flags.
+    pipeline_native builds the program, or takes it from its cache in
+    the per-user cache folder, with the compiler that ``explicit_cxx``,
+    ``CXX`` or discovery selects. A copy is published in ``out_dir``,
+    where the variance result's provenance names it, unless the copy
+    there already matches.
 
     Args:
         source: C++ source file.
@@ -1101,8 +1040,8 @@ def build_native_binary(
 
     Raises:
         FileNotFoundError: If the C++ source is missing.
-        RuntimeError: If no supported compiler can be found.
-        subprocess.CalledProcessError: If compilation fails.
+        RuntimeError: If no supported compiler can be found or
+            compilation fails.
     """
     source = source.resolve()
     if not source.is_file():
@@ -1110,9 +1049,8 @@ def build_native_binary(
 
     out_dir = out_dir.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
-    cxx = _resolve_compiler(explicit_cxx)
-    family = _compiler_family(cxx)
-    exe_name = EXECUTABLE_STEM + (".exe" if os.name == "nt" else "")
+    compiler = find_compiler(explicit_cxx)
+    exe_name = EXECUTABLE_STEM + EXE_SUFFIX
     exe_path = out_dir / exe_name
     source_hash = sha256_file(source)
     artifact_header = source.with_name(NATIVE_FILES_HEADER_FILE)
@@ -1121,16 +1059,19 @@ def build_native_binary(
             f"Shared native filename header not found: {artifact_header}"
         )
     artifact_header_hash = sha256_file(artifact_header)
+    built = build_program(source, compiler)
+    built_hash = sha256_file(built)
     state = load_state(out_dir)
     existing_build = state.get("build")
 
     if (
         existing_build is not None
-        and existing_build["compiler"] == cxx
-        and existing_build["compiler_family"] == family
+        and existing_build["compiler"] == compiler.path
+        and existing_build["compiler_family"] == compiler.family
         and existing_build["source_sha256"] == source_hash
         and existing_build["artifact_header_sha256"] == artifact_header_hash
         and existing_build["executable"] == exe_name
+        and existing_build["executable_sha256"] == built_hash
         and exe_path.is_file()
     ):
         actual_executable_hash = sha256_file(exe_path)
@@ -1141,53 +1082,20 @@ def build_native_binary(
         LOGGER.warning(
             (
                 'Existing executable does not match committed '
-                'build metadata; rebuilding'
+                'build metadata; republishing'
             )
         )
-
-    LOGGER.info("Compiling %s with %s", source, cxx)
 
     with tempfile.TemporaryDirectory(
         dir=out_dir, prefix=".compute_variances_build_"
     ) as build_name:
         build_dir = Path(build_name)
         temporary_exe = build_dir / exe_name
-
-        if family == "msvc":
-            object_path = build_dir / f"{EXECUTABLE_STEM}.obj"
-            command = [
-                cxx,
-                "/nologo",
-                "/O2",
-                "/std:c++20",
-                "/EHsc",
-                str(source),
-                f"/Fe:{temporary_exe}",
-                f"/Fo:{object_path}",
-            ]
-        else:
-            # -ffp-contract=off: fused multiply-adds, which Apple Clang
-            # uses by default on arm64, would change the results there.
-            command = [
-                cxx,
-                "-O2",
-                "-std=c++20",
-                "-ffp-contract=off",
-                "-o",
-                str(temporary_exe),
-                str(source),
-            ]
-
-        subprocess.run(command, check=True, cwd=out_dir)
-        if not temporary_exe.is_file():
-            raise RuntimeError(
-                f"Compiler reported success but did not create {temporary_exe}"
-            )
+        shutil.copy(built, temporary_exe)
 
         new_executable_hash = sha256_file(temporary_exe)
-        # Reload state because compilation can be long-running and
-        # another trusted process may have updated the pipeline metadata
-        # meanwhile.
+        # Reload state in case another trusted process has updated the
+        # pipeline metadata meanwhile.
         state = load_state(out_dir)
         old_build = state.get("build")
         old_executable_hash = (
@@ -1197,8 +1105,8 @@ def build_native_binary(
         _invalidate_untrusted_variance(out_dir, state)
 
         new_build: BuildState = {
-            "compiler": cxx,
-            "compiler_family": family,
+            "compiler": compiler.path,
+            "compiler_family": compiler.family,
             "source_sha256": source_hash,
             "artifact_header_sha256": artifact_header_hash,
             "executable": exe_name,
@@ -1299,8 +1207,7 @@ def run_native_binary(out_dir: Path) -> Path:
         RuntimeError: If input or executable provenance is
             missing/mismatched, or if a successful native process does
             not create the expected output.
-        subprocess.CalledProcessError: If the native program exits
-        nonzero.
+        NativeProgramError: If the native program exits nonzero.
     """
     out_dir = out_dir.resolve()
     state = ensure_committed_inputs(out_dir)
@@ -1346,7 +1253,7 @@ def run_native_binary(out_dir: Path) -> Path:
         run_dir = Path(run_name)
         _copy_committed_inputs(out_dir, run_dir)
 
-        subprocess.run([str(exe_path)], check=True, cwd=run_dir)
+        run_program(exe_path, cwd=run_dir)
 
         staged_variance = run_dir / TERM_VARIANCES_FILE
         if not staged_variance.is_file():

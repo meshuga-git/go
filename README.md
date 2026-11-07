@@ -21,7 +21,7 @@ For delimited-text and spreadsheet inputs, the first row must contain column hea
 
 ## Requirements
 
-- A C++20-compliant compiler. `clustering.py` invokes the compiler specified by `CXX`, or `g++` by default, using GNU-style command-line options.
+- A C++20-compliant compiler. The scripts build their native programs through `pipeline_native.py`, which uses the compiler named by `--cxx` where a script offers that option, then the one named by the `CXX` environment variable. Otherwise it looks, on Windows, for `cl` in an active Developer prompt and then for the newest Visual Studio with the C++ tools (through vswhere), and on every system for `g++`, then `clang++`, on `PATH`. Builds are kept in your per-user cache folder (`%LOCALAPPDATA%\tavnit\build` on Windows, `~/Library/Caches/tavnit/build` on macOS, `$XDG_CACHE_HOME/tavnit/build` or `~/.cache/tavnit/build` elsewhere) and reused until a source, the compiler or the options change.
 - Python 3.10 or higher with `pandas` and `numpy`. Dendrogram generation additionally requires `scipy` and `plotly`.
 - Depending on the input formats used, pandas may require optional reader libraries such as `openpyxl` (`.xlsx`), `xlrd` (`.xls`), `pyreadstat` (`.sav`/`.por`), `tables` (`.h5`), and `pyarrow` or `fastparquet` (`.parquet`), and `pyarrow` (`.orc`).
 
@@ -39,6 +39,7 @@ The pipeline is intended to work on Windows and POSIX systems (e.g., Linux and m
    compute_variances.py
    pipeline_formats.py
    pipeline_io.py
+   pipeline_native.py
    samples_by_cluster.py
    reconstruct_hierarchy.cpp
    run_clustering.cpp
@@ -80,7 +81,7 @@ The pipeline is intended to work on Windows and POSIX systems (e.g., Linux and m
    - `cannot_links.txt`, `must_links.txt`, and `no_links.txt`, which record the selected input folders;
    - `clustering_results` folder
 
-   `clustering.py` automatically compiles `run_clustering.cpp` and runs the resulting executable. The clustering engine computes all pairwise distances and repeatedly splits one active cluster into two until every sample is a terminal leaf.
+   `clustering.py` builds `run_clustering.cpp` (see Requirements) and runs the resulting executable. The clustering engine computes all pairwise distances and repeatedly splits one active cluster into two until every sample is a terminal leaf.
 
    It writes the following files to `clustering_results`:
    - `filenames.txt`: the parsed sample files in downstream order (cannot-link folder 1, cannot-link folder 2, must-link folder, then no-link folder);
@@ -88,19 +89,12 @@ The pipeline is intended to work on Windows and POSIX systems (e.g., Linux and m
    - `tree_splits.txt`: the authoritative immutable tree topology. It begins with `root 0`; each subsequent record has the form `split <iteration> <parent> <retained_child> <extracted_child>`. Split `k` retires its parent and creates fresh child IDs `2k-1` and `2k`.
 
 2. Reconstruct the cluster hierarchy:
-2a. Compile `reconstruct_hierarchy.cpp` in C++20 mode, for example:
 
    ```text
-   g++ -std=c++20 -O2 reconstruct_hierarchy.cpp -o reconstruct_hierarchy
+   python pipeline_native.py run reconstruct_hierarchy clustering_results
    ```
 
-   On Windows, use the corresponding `.exe` output name. The variance
-   wrapper also compiles its native source in C++20 mode. 
-2b. Reconstruct the hierarchy:
-   ```text
-   ./reconstruct_hierarchy clustering_results        # POSIX
-   reconstruct_hierarchy.exe clustering_results      # Windows
-   ```
+   This builds `reconstruct_hierarchy.cpp` the first time (see Requirements) and runs it on `clustering_results`. `python pipeline_native.py build reconstruct_hierarchy` only builds it and prints where the program is.
 
    The program reads `filenames.txt`, `tree_splits.txt`, and every `iter*.txt` file and creates `clustering_results/total_data.csv`.
 
@@ -124,6 +118,7 @@ The pipeline is intended to work on Windows and POSIX systems (e.g., Linux and m
    pipeline_files.hpp
    pipeline_formats.py
    pipeline_io.py
+   pipeline_native.py
    samples_by_cluster.py
    tjala.py
    samples_by_signature.py
@@ -141,14 +136,14 @@ The pipeline is intended to work on Windows and POSIX systems (e.g., Linux and m
 
    `genes.txt` must be in UTF-8 format with one gene identifier per line. Blank lines are ignored. Genes whose original expression is zero in every sample are dropped before integer conversion, and a supplied gene list is then used as an allowlist. If a gene is absent from an individual sample file, cross-sample alignment fills that absent gene with `0`; however, a missing, nonnumeric, or non-finite expression value in an actual source row is rejected rather than silently replaced. Expression values are truncated toward zero to signed 32-bit integers, so the input should be on a scale where integer values are meaningful (for example, counts).
 
-   The full command prepares the inputs, compiles `compute_variances.cpp`, runs the native variance engine, and creates:
+   The full command prepares the inputs, builds `compute_variances.cpp` (see Requirements; `--cxx` names a compiler), runs the native variance engine, and creates:
    - `matrix_genes.txt`: the retained genes, one per line;
    - `matrix_samples.txt`: the sample identifiers, one per line, in matrix-column order;
    - `sample_lineages.txt`: each sample identifier, its membership count, and its immutable hierarchy-node memberships;
    - `matrix_values.txt`: a space-delimited genes-by-samples integer expression matrix;
    - `term_variances.txt`: a space-delimited file with `gene threshold operator_code variance` on each line (`0` = equality, `1` = `<`, `2` = `>`);
    - `compute_variances_state.json`: hashes and metadata used to validate the prepared inputs, compiled executable, and variance output before restartable stages proceed;
-   - the compiled `compute_variances` executable.
+   - a copy of the `compute_variances` executable, which the variance result's provenance names.
 
 3. Generate a list of terminal descendant clusters and inspect the hierarchy below a selected immutable node:
 
@@ -205,17 +200,18 @@ The pipeline is intended to work on Windows and POSIX systems (e.g., Linux and m
 This revision implements the changes selected in `changes1.docx`. The
 clustering and Tjala mathematical objectives, split rules, tie-breaking,
 heuristic fallback, search defaults, and threshold conversion are unchanged.
-No additional Python helper script or persistent directory hierarchy is
-introduced. Shared Python I/O and topology utilities live in the existing
-`compute_variances.py`; keep that file beside every dependent Python script.
+Shared Python code lives in `pipeline_io.py`, `pipeline_formats.py` and
+`pipeline_native.py`, and is still re-exported by `compute_variances.py`;
+keep all four beside every Python script.
 The native files contain matching local I/O utilities and require C++20.
 Their artifact filenames are defined once in `pipeline_files.hpp`; keep that
 header beside every C++ source when compiling.
 
 ### Upgrade and regeneration
 
-Replace the six Python files, three C++ files, shared C++ header, this README,
-and the two algorithm documents as one matched revision. Recompile the native programs.
+Replace the Python files, the C++ files, the shared C++ header, this README,
+and the two algorithm documents as one matched revision. The native programs
+are rebuilt automatically when their sources change.
 The delivered `build_dendrogram.py` is the canonical name of the uploaded
 `build_dendrogram(1).py`.
 

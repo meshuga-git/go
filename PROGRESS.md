@@ -59,11 +59,27 @@ request into `main`; each task is one commit.
   states (history), snapshots, lineages, matrix, signature report,
   cannot-cluster list, per-sample CSVs, and the Python history writer
   from the review's prototype (`histbench/np_reconstruct.py`).
-- `pipeline_native.py`: compiler from an explicit argument, then `CXX`,
-  then discovery (MSVC through vswhere, MinGW-w64 g++, clang++); cache
-  in the per-user cache folder; `.exe` only on Windows; compiler output
-  streams live. `reconstruct_hierarchy` is built and run through its
-  command line until Phase 4 moves the history to Python.
+- `pipeline_native.py` (task 2.3): the compiler comes from `--cxx`,
+  then `CXX`, then discovery: on Windows `cl` in an active Developer
+  prompt, then the newest Visual Studio with the C++ tools through
+  vswhere (with the environment its `vcvarsall.bat` sets up), then
+  everywhere `g++` and `clang++` on PATH. The plan's risk register
+  lists `CXX` after vswhere; it stays ahead of discovery because the
+  scripts keep their configuration mechanisms, and the harness's
+  MinGW runs rely on it. Builds go to
+  `<user cache>/tavnit/build/<program>-<key>`, keyed on the source and
+  the local headers it includes, the compiler's path and version
+  (with `INCLUDE` for MSVC) and the flags; the compiler reads copies
+  of exactly the hashed files, and an entry whose program has changed
+  is rebuilt. GNU-style builds use `-std=c++20 -O2 -ffp-contract=off`,
+  MSVC `/nologo /std:c++20 /O2 /EHsc /utf-8`. Compiler and program
+  output reach the console live. `reconstruct_hierarchy` is built and
+  run with `python pipeline_native.py run reconstruct_hierarchy
+  clustering_results` until task 4.1 removes it. compute_variances
+  keeps publishing a copy of its program into the results folder,
+  because the variance result's provenance and the state JSON name
+  it; task 4.2 deletes both. The golden harness now counts any other
+  executable in a work folder as an artifact.
 - Format inventory for 2.2 and 2.4 (where each reader and writer lives
   today; 2.2 moves or builds the canonical one in pipeline_formats,
   2.4 switches the callers and deletes the rest):
@@ -208,7 +224,7 @@ request into `main`; each task is one commit.
 | --- | --- | --- |
 | 2.1 | Create pipeline_io.py from Block 0 of compute_variances.py: constants and artifact owners, UTF-8 and CSV... | Done |
 | 2.2 | Create pipeline_formats.py: topology, snapshots, history reader and validator, lineages, the matrix... | Done |
-| 2.3 | Create pipeline_native.py from the MSVC-capable helper in compute_variances.py, adding vswhere, MinGW and... | Not started |
+| 2.3 | Create pipeline_native.py from the MSVC-capable helper in compute_variances.py, adding vswhere, MinGW and... | Done |
 | 2.4 | Switch every script to the core and delete what it replaces: five writers, four duplicate readers, three... | Not started |
 | 2.5 | Make producer a required argument of the manifest writer. | Not started |
 | 2.6 | Replace repeated literals with the constants: clustering_results, the parsed-data suffixes, .provenance,... | Not started |

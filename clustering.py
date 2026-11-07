@@ -10,9 +10,7 @@ import csv
 import io
 import json
 import os
-import platform
 import re
-import subprocess
 import sys
 from collections import defaultdict
 from collections.abc import Callable
@@ -45,6 +43,7 @@ from compute_variances import (
     write_provenance,
     write_text_atomically,
 )
+from pipeline_native import build_program, run_program
 
 DISTANCE_METRICS: dict[str, str] = {
     "1": "euclidean",
@@ -689,57 +688,6 @@ def discover_input_files(mypath: str) -> dict[str, list[str]]:
 # ======================================================================
 
 
-def compile_cpp_code(cpp_file: str, output_base: str) -> str:
-    """Compile the native clustering target with GNU-style options.
-
-    Args:
-        cpp_file: Source path, relative to the current directory if
-            needed.
-        output_base: Executable stem, without its platform suffix.
-
-    Returns:
-        Executable filename ending in ``.exe`` or ``.out``.
-
-    Raises:
-        RuntimeError: If the selected compiler is missing or fails.
-
-    ``CXX`` selects the compiler executable; otherwise ``g++`` is used.
-    The target is compiled in C++20 mode and written in the current
-    folder.
-    """
-    output_file = (
-        f"{output_base}.exe"
-        if platform.system() == "Windows"
-        else f"{output_base}.out"
-    )
-
-    try:
-        result = subprocess.run(
-            # -ffp-contract=off: fused multiply-adds, which Apple Clang
-            # uses by default on arm64, would change the results there.
-            [os.environ.get("CXX", "g++"), "-std=c++20", cpp_file, "-O2",
-                "-ffp-contract=off", "-o", output_file],
-            stdout=None,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False,
-        )
-    except FileNotFoundError as exc:
-        raise RuntimeError(
-            "A C++ compiler not found. "
-            "Is a C++ compiler installed and on PATH?"
-        ) from exc
-
-    if result.returncode != 0 or not os.path.isfile(output_file):
-        message = result.stderr.strip() or (
-            f"Compiler exited with code {result.returncode}"
-        )
-        raise RuntimeError(f"Error compiling C++ code: {message}")
-
-    print(f"C++ code compiled successfully to {output_file}")
-    return output_file
-
-
 def _write_paths_file(filename: Path, paths: list[str]) -> None:
     """Publish constraint-configuration paths with provenance.
 
@@ -1153,41 +1101,21 @@ def main() -> int:
                               folder_genes.setdefault(folder, []))
     _warn_zero_filled_genes(folder_genes)
 
-    exe_path = compile_cpp_code(str(cpp_source), "run_clustering")
+    executable = build_program(cpp_source)
 
     clustering_results_dir = Path("clustering_results")
     _clean_clustering_results(clustering_results_dir)
 
-    if platform.system() == "Windows":
-        executable = f".\\{exe_path}"
-    else:
-        executable = f"./{exe_path}"
-
     print(f"Running clustering executable: {executable}...", file=sys.stderr)
-    # Build the results-dir argument with explicit str(...) for
-    # consistency with the rest of the file's Path-to-str conversions,
-    # to preserve the executable's prefix-path interface.
+    # The executable takes the results folder as an output prefix, so
+    # the argument ends with a separator.
     results_dir_arg = str(clustering_results_dir) + os.sep
-    result = subprocess.run(
-        [executable, results_dir_arg, distance_metric],
-        stdout=None,
-        stderr=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
-
-    if result.returncode != 0:
-        raise RuntimeError(
-            "Error running clustering executable:\n"
-            + (result.stderr.strip() or f"Exit code {result.returncode}")
-        )
+    run_program(executable, [results_dir_arg, distance_metric])
 
     verify_artifacts([
         clustering_results_dir / SAMPLE_PATHS_FILE,
         clustering_results_dir / TREE_TOPOLOGY_FILE,
     ])
-    if result.stderr:
-        print(result.stderr, end="", file=sys.stderr)
     sample_count, node_count = _validate_clustering_outputs(
         clustering_results_dir
     )
