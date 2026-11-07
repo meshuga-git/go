@@ -731,6 +731,7 @@ def publish_inputs(
             out_dir / PREPARED_PROVENANCE_FILE, stage="prepare",
             outputs=[out_dir / name for name in INPUT_FILES],
             inputs=source_paths, parents=parent_manifests,
+            producer=Path(__file__),
         )
         if old_commit_hash != sha256_file(prepared_manifest):
             invalidate_dependents(
@@ -1080,6 +1081,7 @@ def _copy_committed_inputs(source_dir: Path, run_dir: Path) -> None:
         outputs=[run_dir / name for name in INPUT_FILES],
         inputs=[source_dir / name for name in INPUT_FILES],
         parents=[source_dir / PREPARED_PROVENANCE_FILE],
+        producer=Path(__file__),
     )
 
 
@@ -1179,6 +1181,7 @@ def run_native_binary(out_dir: Path) -> Path:
         outputs=[variance_path],
         inputs=[out_dir / name for name in INPUT_FILES] + [exe_path],
         parents=[out_dir / PREPARED_PROVENANCE_FILE],
+        producer=Path(__file__),
     )
     return variance_path
 

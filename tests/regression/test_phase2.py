@@ -232,3 +232,26 @@ def test_2_3_windows_finds_visual_studio_without_a_developer_prompt(
     executable = pipeline_native.build_program(_sources(tmp_path / "code"),
                                                compiler)
     assert _run(executable, "ok").returncode == 3
+
+
+def test_2_5_every_manifest_names_its_stage_script(workflow: Path) -> None:
+    """Task 2.5 (A8): the producer is the stage script, never the core.
+
+    Since the manifest writer moved into pipeline_io, a default of "this
+    module" would name pipeline_io.py; the producer is now required.
+    """
+    import hashlib
+    import inspect
+
+    import pipeline_io
+
+    for function in (pipeline_io.write_provenance,
+                     pipeline_io.render_provenance):
+        producer = inspect.signature(function).parameters["producer"]
+        assert producer.default is inspect.Parameter.empty
+    results = workflow / "clustering_results"
+    script = hashlib.sha256(
+        (results / "compute_variances.py").read_bytes()).hexdigest()
+    for name in ("prepared.provenance", "term_variances.txt.provenance"):
+        record = pipeline_io.read_provenance(results / name)
+        assert record.producer == script, name

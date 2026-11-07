@@ -152,6 +152,11 @@ request into `main`; each task is one commit.
 
 ## Findings
 
+- Phase 2, task 2.5: from task 2.1 until this task, the variance
+  stage's three manifests named pipeline_io.py as their producer, as
+  finding A8 predicted, because the moved manifest writer defaulted to
+  its own module. The producer is now a required argument.
+
 - Phase 0: on the 300-sample timing set under Python 3.10, Tjala stops
   with "Normalized pheromones do not sum to 1.0: 0.9999999999986108"
   once 839,930 terms are active. Under Python 3.14 the same check passes
@@ -246,7 +251,7 @@ request into `main`; each task is one commit.
 | 2.2 | Create pipeline_formats.py: topology, snapshots, history reader and validator, lineages, the matrix... | Done |
 | 2.3 | Create pipeline_native.py from the MSVC-capable helper in compute_variances.py, adding vswhere, MinGW and... | Done |
 | 2.4 | Switch every script to the core and delete what it replaces: five writers, four duplicate readers, three... | Done |
-| 2.5 | Make producer a required argument of the manifest writer. | Not started |
+| 2.5 | Make producer a required argument of the manifest writer. | Done |
 | 2.6 | Replace repeated literals with the constants: clustering_results, the parsed-data suffixes, .provenance,... | Not started |
 | 2.7 | Delete the 10 unused imports and the if True: blocks. | Done |
 | 2.8 | Unit tests for every shared format and grammar: report round trip, Python–C++ grammar agreement, and the... | Not started |

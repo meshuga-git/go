@@ -573,7 +573,7 @@ def render_provenance(
     path: Path, *, stage: str, outputs: Iterable[Path],
     inputs: Iterable[Path] = (), parents: Iterable[Path] = (),
     categories: dict[str, str] | None = None,
-    producer: Path | None = None,
+    producer: Path,
 ) -> str:
     """Return the record that ``write_provenance`` would write.
 
@@ -585,7 +585,7 @@ def render_provenance(
         parents: Verified upstream manifests for generated inputs.
         categories: Optional sample-to-source-folder mapping for
             plotting.
-        producer: Producing source file; defaults to this module.
+        producer: The stage script that produced the outputs.
 
     Returns:
         The record's text.
@@ -597,7 +597,6 @@ def render_provenance(
     if stage not in _STAGE_NAMES:
         raise ValueError(f"Unknown provenance stage: {stage}")
     path = path.resolve()
-    producer = Path(__file__) if producer is None else producer
     lines = [PROVENANCE_HEADER, f"stage\t{stage}",
              f"producer\t{sha256_file(producer)}"]
     for kind, objects in (("I", inputs), ("P", parents), ("O", outputs)):
@@ -622,7 +621,7 @@ def write_provenance(
     path: Path, *, stage: str, outputs: Iterable[Path],
     inputs: Iterable[Path] = (), parents: Iterable[Path] = (),
     categories: dict[str, str] | None = None,
-    producer: Path | None = None,
+    producer: Path,
 ) -> None:
     """Commit stage output hashes and their dependencies.
 
@@ -638,7 +637,7 @@ def write_provenance(
         parents: Verified upstream manifests for generated inputs.
         categories: Optional sample-to-source-folder mapping for
             plotting.
-        producer: Producing source file; defaults to this module.
+        producer: The stage script that produced the outputs.
 
     Raises:
         OSError: If hashing or publication fails.
