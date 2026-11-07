@@ -186,6 +186,18 @@ def read_tree_states(path: Path) -> pd.DataFrame:
         raise ValueError(f"{path}: history omits immutable nodes")
     if len(set(states[:, -1])) != count:
         raise ValueError(f"{path}: terminal sample leaves must be distinct")
+    # Rows are sorted by their node history, compared node by node, so
+    # that every cluster occupies consecutive rows.
+    if count > 1:
+        differs = states[1:] != states[:-1]
+        first = differs.argmax(axis=1)
+        rows = np.arange(count - 1)
+        unsorted = np.flatnonzero(
+            states[1:][rows, first] < states[:-1][rows, first])
+        if unsorted.size:
+            raise ValueError(
+                f"{path}:{int(unsorted[0]) + 2}: rows are not sorted by "
+                "their node history")
     data = pd.DataFrame(states, columns=[str(i) for i in range(1, count + 1)])
     data.insert(0, "0", paths)
     return data
@@ -473,7 +485,7 @@ def render_tree_states(paths: list[str], states: np.ndarray) -> str:
 
 
 def read_sample_lineages(
-    path: Path, samples: list[str]
+    path: Path, samples: list[str], *, history: SampleLineages | None = None
 ) -> dict[str, tuple[int, ...]]:
     """Read ``sample_lineages.txt`` with the rules its producer keeps.
 
@@ -482,9 +494,17 @@ def read_sample_lineages(
     canonical decimal, root 0 first and strictly increasing. Together
     the rows cover every node of the tree and end at distinct leaves.
 
+    The preparation derives each row from the history, so with
+    ``history`` every row must also equal its sample's lineage there:
+    it follows the topology's parent-child links and ends at its
+    sample's own leaf.
+
     Args:
         path: ``sample_lineages.txt`` path.
         samples: Unique sample IDs from ``matrix_samples.txt``.
+        history: Each sample's lineage as ``load_tree_states`` derives
+            it from ``total_data.csv`` and ``tree_splits.txt``, if the
+            caller has it.
 
     Returns:
         Each sample's lineage, in ``samples`` order.
@@ -539,6 +559,16 @@ def read_sample_lineages(
         raise ValueError(f"{path.name}: lineages do not cover the tree")
     if len(leaves) != sample_count:
         raise ValueError(f"{path.name}: lineages must end at distinct leaves")
+    if history is not None:
+        if set(history) != known:
+            raise ValueError(
+                f"{path.name}: its samples differ from the history's")
+        for sample in samples:
+            if lineages[sample] != tuple(history[sample]):
+                raise ValueError(
+                    f"{path.name}: the lineage of {sample!r} is "
+                    f"{list(lineages[sample])}, but the history gives "
+                    f"{list(history[sample])}")
     return {sample: lineages[sample] for sample in samples}
 
 

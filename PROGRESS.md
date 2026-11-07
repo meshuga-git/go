@@ -146,6 +146,13 @@ request into `main`; each task is one commit.
   writer parses its own text back before returning it. So the report
   meets task 2.10's rules from the start; they take effect when 2.4
   moves `samples_by_signature.py` onto this parser.
+- Task 2.9: Tjala and samples_by_signature.py derive each sample's
+  lineage from `total_data.csv` and `tree_splits.txt` (through
+  `load_tree_states`) and require `sample_lineages.txt` to match it,
+  which tests the parent-child links and the sample-leaf binding. Both
+  files sit beside the prepared files in the results folder and are
+  already inputs of the prepare stage, so the manifests do not change.
+  The history reader checks that rows are sorted by their node history.
 - Part 2 runs from copies in `clustering_results`, so the README's copy
   list and the golden harness's `PACKAGE` and `PART2` lists gain the
   core modules.
@@ -255,7 +262,7 @@ request into `main`; each task is one commit.
 | 2.6 | Replace repeated literals with the constants: clustering_results, the parsed-data suffixes, .provenance,... | Done |
 | 2.7 | Delete the 10 unused imports and the if True: blocks. | Done |
 | 2.8 | Unit tests for every shared format and grammar: report round trip, Python–C++ grammar agreement, and the... | Not started |
-| 2.9 | Strengthen the format checks: each lineage must follow real parent–child links in the topology and end at... | Not started |
+| 2.9 | Strengthen the format checks: each lineage must follow real parent–child links in the topology and end at... | Done |
 | 2.10 | Make writer and readers agree: each format splits on the exact ASCII separator it names and rejects other... | Not started |
 
 ### Phase 3: Command-line layer

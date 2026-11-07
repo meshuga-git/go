@@ -255,3 +255,66 @@ def test_2_5_every_manifest_names_its_stage_script(workflow: Path) -> None:
     for name in ("prepared.provenance", "term_variances.txt.provenance"):
         record = pipeline_io.read_provenance(results / name)
         assert record.producer == script, name
+
+
+def test_2_9_lineages_must_be_the_ones_the_history_implies(
+        workflow: Path, tmp_path: Path) -> None:
+    """Task 2.9 (C15): a lineage follows real links to its own leaf."""
+    import pipeline_formats
+    import pipeline_io
+
+    results = workflow / "clustering_results"
+    samples = pipeline_io.read_identifiers(results / "matrix_samples.txt",
+                                           label="sample")
+    history, _ = pipeline_formats.load_tree_states(
+        results / "total_data.csv")
+    lineages = pipeline_formats.read_sample_lineages(
+        results / "sample_lineages.txt", samples, history=history)
+    assert lineages == {sample: tuple(history[sample]) for sample in samples}
+
+    def rejected(changed: dict[str, tuple[int, ...]]) -> None:
+        bad = tmp_path / "sample_lineages.txt"
+        bad.write_text(
+            pipeline_formats.render_sample_lineages(samples, changed),
+            encoding="utf-8")
+        # The format's own rules still hold; only the history tells.
+        pipeline_formats.read_sample_lineages(bad, samples)
+        with pytest.raises(ValueError, match="history gives"):
+            pipeline_formats.read_sample_lineages(bad, samples,
+                                                  history=history)
+
+    # Two samples bound to each other's leaf.
+    first, last = samples[0], samples[-1]
+    rejected(dict(lineages, **{first: lineages[last],
+                               last: lineages[first]}))
+    # A lineage that passes through a sibling instead of its parent.
+    for sample, nodes in lineages.items():
+        for position in range(1, len(nodes) - 1):
+            node = nodes[position]
+            sibling = node + 1 if node % 2 else node - 1
+            if sibling < nodes[position + 1] and sibling > nodes[
+                    position - 1]:
+                others = [n for s, ns in lineages.items() if s != sample
+                          for n in ns]
+                if node in others:
+                    changed = list(nodes)
+                    changed[position] = sibling
+                    rejected(dict(lineages, **{sample: tuple(changed)}))
+                    return
+    pytest.fail("no lineage offers a sibling detour")
+
+
+def test_2_9_history_rows_must_be_in_node_order(
+        workflow: Path, tmp_path: Path) -> None:
+    """Task 2.9 (C15): the history is sorted by node history."""
+    import pipeline_formats
+
+    data = pipeline_formats.read_tree_states(
+        workflow / "clustering_results" / "total_data.csv")
+    rows = [",".join([str(row[0]), *map(str, row[1:])])
+            for row in data.itertuples(index=False, name=None)]
+    rows[0], rows[1] = rows[1], rows[0]
+    swapped = tmp_path / "total_data.csv"
+    swapped.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="not sorted"):
+        pipeline_formats.read_tree_states(swapped)

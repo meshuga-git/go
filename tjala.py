@@ -32,6 +32,7 @@ from pipeline_formats import (
     Signature,
     SignatureReport,
     SignatureTerm,
+    load_tree_states,
     read_cluster_list,
     read_matrix_values,
     read_sample_lineages,
@@ -621,7 +622,10 @@ def load_algorithm_data(
     ]
     variances = pd.DataFrame(variance_rows)
 
-    lineages = read_sample_lineages(Path(file_paths["hierarchy"]), samples)
+    # The lineages must be the ones the history implies (task 2.9).
+    history, _ = load_tree_states(Path(base_path) / TREE_STATES_FILE)
+    lineages = read_sample_lineages(Path(file_paths["hierarchy"]), samples,
+                                    history=history)
     hierarchies: dict[str, set[str]] = {
         sample: {str(node_id) for node_id in nodes}
         for sample, nodes in lineages.items()

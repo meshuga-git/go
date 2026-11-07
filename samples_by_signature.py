@@ -17,6 +17,7 @@ from numpy.typing import NDArray
 from pipeline_formats import (
     Signature,
     iter_matrix_rows,
+    load_tree_states,
     read_sample_lineages,
     read_signature_report,
     tree_node_count,
@@ -27,6 +28,7 @@ from pipeline_io import (
     MATRIX_VALUES_FILE,
     SAMPLE_LINEAGES_FILE,
     TJALA_OUTPUT_FILE,
+    TREE_STATES_FILE,
     prompt_input,
     provenance_path,
     read_identifiers,
@@ -454,7 +456,10 @@ def run(base_path: Path) -> Path | None:
         raise ValueError(
             f"Row-count mismatch: {MATRIX_VALUES_FILE} has {row_count} "
             f"row(s), but {MATRIX_GENES_FILE} has {len(genes)} gene(s).")
-    lineages = read_sample_lineages(paths["hierarchy"], samples)
+    # The lineages must be the ones the history implies (task 2.9).
+    history, _ = load_tree_states(base_path / TREE_STATES_FILE)
+    lineages = read_sample_lineages(paths["hierarchy"], samples,
+                                    history=history)
     hierarchy_rows = tuple(
         frozenset(str(node) for node in lineages[sample])
         for sample in samples
