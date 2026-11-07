@@ -1369,6 +1369,41 @@ private:
         }
     }
     /**
+     * @brief Name the samples whose values do not vary.
+     * @details A correlation needs variance on both sides, so such a
+     *     sample gets distance 2.0 to every other one, even to an
+     *     identical sample. The sums repeat the pairwise loops exactly,
+     *     so the warning names the same samples those loops treat so.
+     * @param metric Metric name for the message.
+     * @param row Returns sample i's values: expressions or ranks.
+     * @param avg Per-sample means of those values.
+     */
+    template <typename Row>
+    void warn_zero_variance(const char* metric, Row row,
+        const std::vector<double>& avg) const {
+        std::vector<std::string> names;
+        for (std::size_t i = 0; i < avg.size(); ++i) {
+            double squares = 0.0;
+            for (const double value : row(i)) {
+                const double deviation = value - avg[i];
+                squares += deviation * deviation;
+            }
+            if (squares <= 0.0) {
+                names.push_back(fs::path(dataset_.sample_paths()[i])
+                    .filename().string());
+            }
+        }
+        if (names.empty()) return;
+        std::string listed;
+        for (const auto& name : names) {
+            listed += (listed.empty() ? "" : ", ") + name;
+        }
+        std::cerr << std::format(
+            "Warning: {} sample(s) do not vary, so their {} distance to "
+            "every sample is 2.0: {}\n", names.size(), metric, listed);
+    }
+
+    /**
      * @brief Fill one-minus-Pearson-correlation distances.
      * @throws std::runtime_error If a computed correlation is
      *     nonfinite.
@@ -1382,6 +1417,8 @@ private:
             avg[i] = std::accumulate(expr.begin(), expr.end(), 0.0)
             / static_cast<double>(genes);
         }
+        warn_zero_variance("Pearson",
+            [&](std::size_t i) { return dataset_.expressions(i); }, avg);
         for (std::size_t i = 0; i < n; ++i) {
             const auto expr_i = dataset_.expressions(i);
             for (std::size_t j = 0; j < i; ++j) {
@@ -1471,6 +1508,10 @@ private:
             avg[i] = std::accumulate(row.begin(), row.end(), 0.0)
             / static_cast<double>(genes);
         }
+        warn_zero_variance("Spearman", [&](std::size_t i) {
+                return std::span<const double>(rank_matrix.data() + i * genes,
+                    genes);
+            }, avg);
         for (std::size_t i = 0; i < n; ++i) {
             const auto rank_i = std::span<const double>(rank_matrix.data() + i
              * genes, genes);

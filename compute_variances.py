@@ -1476,14 +1476,24 @@ def build_matrix(raw_paths: Iterable[str], data_dir: Path) -> pd.DataFrame:
         Dense floating-point expression matrix with sorted genes.
     """
     series_by_sample: dict[str, pd.Series] = {}
+    folders: dict[str, list[str]] = {}
 
     for raw_path in raw_paths:
         sid = sample_id(raw_path)
         resolved = resolve_sample_path(raw_path, data_dir)
         series_by_sample[sid] = _read_sample_expression(resolved, sid)
+        folders.setdefault(str(resolved.parent), []).append(sid)
 
     matrix = pd.DataFrame(series_by_sample)
     matrix = matrix.reindex(sorted(matrix.index))
+    # Zero-fill stays the rule; say how many genes it supplies where.
+    for folder, members in folders.items():
+        filled = int(matrix[members].isna().any(axis=1).sum())
+        if filled:
+            print(
+                f"Warning: {filled} gene(s) absent from samples in "
+                f"{folder} are set to 0 there.", file=sys.stderr,
+            )
     matrix = matrix.fillna(0.0)
     return matrix
 

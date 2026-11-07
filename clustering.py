@@ -555,6 +555,7 @@ def _clean_output_files(output_path: Path) -> None:
 def write_sample_csvs(
     all_files: dict[str, list[str]], output_dir: str,
     known_sample_ids: set[str] | None = None,
+    gene_sets: list[frozenset[str]] | None = None,
 ) -> list[str]:
     """Publish normalized per-sample CSVs and their provenance.
 
@@ -566,6 +567,8 @@ def write_sample_csvs(
         all_files: Source paths grouped by deterministic output prefix.
         output_dir: Existing-layout parsed-data destination.
         known_sample_ids: Run-wide sample IDs, updated in place.
+        gene_sets: If given, receives each source table's normalized
+            gene IDs, which all of its samples share.
 
     Returns:
         Absolute generated sample paths in deterministic ingestion
@@ -593,6 +596,8 @@ def write_sample_csvs(
                 raise ValueError(f"Unsupported format: {file_path}")
             dataframe = _load_dataframe(file_path, reader)
             labels = _normalize_expression_columns(dataframe, file_path)
+            if gene_sets is not None:
+                gene_sets.append(frozenset(dataframe["gene"]))
             for expression_column in labels:
                 name = _build_output_name(prefix, file_path, expression_column)
                 if name in seen:
@@ -754,13 +759,17 @@ def _write_paths_file(filename: Path, paths: list[str]) -> None:
     )
 
 
-def _process_input_folder(folder: str, known_sample_ids: set[str]) -> None:
+def _process_input_folder(
+    folder: str, known_sample_ids: set[str],
+    gene_sets: list[frozenset[str]] | None = None,
+) -> None:
     """Publish one source group and its sample-file manifest.
 
     Args:
         folder: Constraint-group source folder.
         known_sample_ids: Run-wide IDs used to reject cross-group
             collisions.
+        gene_sets: If given, receives each source table's gene IDs.
 
     Raises:
         ValueError: If data or global sample identity is invalid.
@@ -769,7 +778,8 @@ def _process_input_folder(folder: str, known_sample_ids: set[str]) -> None:
     folder_path = Path(folder).resolve()
     all_files = discover_input_files(str(folder_path))
     parsed_dir = folder_path.with_name(folder_path.name + "_parsed_data")
-    generated = write_sample_csvs(all_files, str(parsed_dir), known_sample_ids)
+    generated = write_sample_csvs(all_files, str(parsed_dir), known_sample_ids,
+                                  gene_sets)
     manifest = folder_path.with_name(folder_path.name + "_parsed_files.txt")
     write_text_atomically(manifest, "\n".join(generated) + "\n")
     write_provenance(
@@ -778,6 +788,35 @@ def _process_input_folder(folder: str, known_sample_ids: set[str]) -> None:
             parsed_dir / PARSED_DATA_PROVENANCE_FILE],
         producer=Path(__file__),
     )
+
+
+def _warn_zero_filled_genes(
+    folder_genes: dict[str, list[frozenset[str]]]
+) -> None:
+    """Report, per source folder, the genes the engine will set to zero.
+
+    A sample lacks every gene that only other tables measure, and the
+    engine counts it as 0 there. A gene measured in one cohort only
+    can then separate the cohorts on its own.
+
+    Args:
+        folder_genes: Gene IDs of each source table, by folder.
+    """
+    tables = [genes for sets in folder_genes.values() for genes in sets]
+    if not tables:
+        return
+    measured = frozenset().union(*tables)
+    for folder, sets in folder_genes.items():
+        if not sets:
+            continue
+        missing = measured - frozenset.intersection(*sets)
+        if missing:
+            print(
+                f"Warning: {len(missing)} gene(s) absent from samples in "
+                f"{folder} are set to 0 there; a gene measured in one "
+                "cohort only can separate the cohorts on its own.",
+                file=sys.stderr,
+            )
 
 
 def _clean_clustering_results(output_dir: Path) -> None:
@@ -1109,8 +1148,11 @@ def main() -> int:
         )
 
     known_sample_ids: set[str] = set()
+    folder_genes: dict[str, list[frozenset[str]]] = {}
     for folder in folders_all:
-        _process_input_folder(folder, known_sample_ids)
+        _process_input_folder(folder, known_sample_ids,
+                              folder_genes.setdefault(folder, []))
+    _warn_zero_filled_genes(folder_genes)
 
     exe_path = compile_cpp_code(str(cpp_source), "run_clustering")
 

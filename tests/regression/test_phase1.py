@@ -238,3 +238,33 @@ def test_1_10_cannot_cluster_list_checks(workflow: Path) -> None:
                       stdin=_tjala_answers("cluster_1.txt"))
     assert done.returncode != 0
     assert "exported from a different tree" in done.stderr
+
+
+def test_1_8_zero_fill_and_zero_variance_are_reported(
+        workflow: Path, tmp_path: Path) -> None:
+    """Task 1.8: zero-filled genes and flat samples are named.
+
+    The 22-sample set has three genes in each cohort only, so each
+    cohort gets three zero-filled genes, in clustering and in the
+    variance preparation. A sample whose values do not vary is named
+    under Pearson.
+    """
+    logs = workflow.parent / "_logs" / workflow.name
+    for stage in ("clustering", "compute_variances"):
+        text = (logs / f"{stage}.stderr").read_text(encoding="utf-8")
+        assert text.count("Warning: 3 gene(s) absent from samples in") == 2
+
+    flat = tmp_path / "flat"
+    for name in golden.PACKAGE:
+        (flat / name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(REPO / name, flat / name)
+    (flat / "data").mkdir()
+    (flat / "data" / "m.csv").write_text(
+        "gene,F1,F2,F3\nG1,5,1,5\nG2,5,2,3\nG3,5,3,1\nG4,5,4,2\nG5,5,5,4\n",
+        encoding="utf-8")
+    done = run_script(flat, "clustering.py", stdin="2\nNone\nNone\ndata\n")
+    assert done.returncode == 0, done.stderr[-2000:]
+    warning = next(line for line in done.stderr.splitlines()
+                   if "do not vary" in line)
+    assert "Pearson" in warning and "F1" in warning
+    assert "F2" not in warning and "F3" not in warning

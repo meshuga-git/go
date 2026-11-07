@@ -120,7 +120,7 @@ request into `main`; each task is one commit.
 | 1.4 | Remove the symlink refusal from cleanup. | Done |
 | 1.5 | Add a per-process hash memo keyed on path, size, modification time and file ID. | Done |
 | 1.6 | Correct the stage name "terms" to "signatures" in compute_variances.cpp. | Done |
-| 1.8 | Warn with the number of zero-filled genes per cohort, and name the zero-variance samples under Pearson or... | Not started |
+| 1.8 | Warn with the number of zero-filled genes per cohort, and name the zero-variance samples under Pearson or... | Done |
 | 1.9 | Strip only the .version suffix from gene IDs, so _PAR_Y IDs stay distinct from their chrX twins. | Done |
 | 1.10 | Cannot-cluster list: accept 017 and +17. With a manifest, check that it was exported from the current... | Done |
 | 1.11 | Read JSON input with type inference off, so identifiers such as "001" stay text. | Done |
