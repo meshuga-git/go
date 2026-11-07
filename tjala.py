@@ -35,6 +35,7 @@ from compute_variances import (
     parse_decimal_float,
     prompt_input,
     provenance_path,
+    publication_unchanged,
     read_identifiers,
     read_utf8_lines,
     validate_variance_output,
@@ -4366,15 +4367,6 @@ def generate_output_file(
     output_text = "\n\n".join(sections) + "\n"
 
     destination = Path(output_path)
-    invalidate_dependents(
-        [destination, provenance_path(destination)],
-        [destination.parent, destination.parent.parent],
-    )
-    _write_text_atomically(
-        output_path=output_path,
-        content=output_text,
-    )
-
     source_paths = [
         Path(output_dir) / name for name in (
             MATRIX_GENES_FILE, MATRIX_SAMPLES_FILE, MATRIX_VALUES_FILE,
@@ -4382,14 +4374,29 @@ def generate_output_file(
         )
     ]
     source_paths.extend(extra_inputs)
-    write_provenance(
-        provenance_path(Path(output_path)), stage="signatures",
-        outputs=[Path(output_path)], inputs=source_paths,
-        parents={
+    record = {
+        "stage": "signatures",
+        "inputs": source_paths,
+        "parents": {
             provenance_path(path) for path in source_paths
             if provenance_path(path).is_file()
-        }, producer=Path(__file__),
+        },
+        "producer": Path(__file__),
+    }
+    manifest = provenance_path(destination)
+    # An identical report changes nothing, so it keeps its dependents.
+    if publication_unchanged(manifest, {destination: output_text},
+                             **record):
+        return output_path
+    invalidate_dependents(
+        [destination, manifest],
+        [destination.parent, destination.parent.parent],
     )
+    _write_text_atomically(
+        output_path=output_path,
+        content=output_text,
+    )
+    write_provenance(manifest, outputs=[destination], **record)
     return output_path
 
 

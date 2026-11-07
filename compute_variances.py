@@ -43,7 +43,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Iterable, TypedDict, cast
+from typing import Any, Iterable, TypedDict, cast
 
 import numpy as np
 import pandas as pd
@@ -626,6 +626,55 @@ def verify_artifacts(paths: Iterable[Path]) -> None:
             raise ValueError(f"{owner}: does not own required {path.name}")
 
 
+def render_provenance(
+    path: Path, *, stage: str, outputs: Iterable[Path],
+    inputs: Iterable[Path] = (), parents: Iterable[Path] = (),
+    categories: dict[str, str] | None = None,
+    producer: Path | None = None,
+) -> str:
+    """Return the record that ``write_provenance`` would write.
+
+    Args:
+        path: Stage-local manifest destination.
+        stage: Recognized producing-stage name.
+        outputs: Complete owned output set, all beside the manifest.
+        inputs: Explicit input files; raw external data need no parent.
+        parents: Verified upstream manifests for generated inputs.
+        categories: Optional sample-to-source-folder mapping for
+            plotting.
+        producer: Producing source file; defaults to this module.
+
+    Returns:
+        The record's text.
+
+    Raises:
+        OSError: If hashing fails.
+        ValueError: If stage, ownership, or dependency validation fails.
+    """
+    if stage not in _STAGE_NAMES:
+        raise ValueError(f"Unknown provenance stage: {stage}")
+    path = path.resolve()
+    producer = Path(__file__) if producer is None else producer
+    lines = [PROVENANCE_HEADER, f"stage\t{stage}",
+             f"producer\t{sha256_file(producer)}"]
+    for kind, objects in (("I", inputs), ("P", parents), ("O", outputs)):
+        unique = sorted({Path(obj).resolve() for obj in objects}, key=str)
+        for item in unique:
+            if kind == "P":
+                verify_provenance(item)
+            if kind == "O" and item.parent != path.parent:
+                raise ValueError(f"{item}: output is outside manifest folder")
+            name = item.name if kind == "O" else str(item)
+            lines.append(
+                f"{kind}\t{sha256_file(item)}\t{name.encode('utf-8').hex()}"
+            )
+    for sid, folder in sorted((categories or {}).items()):
+        lines.append(
+            f"C\t{sid.encode('utf-8').hex()}\t{folder.encode('utf-8').hex()}"
+        )
+    return "\n".join(lines) + "\n"
+
+
 def write_provenance(
     path: Path, *, stage: str, outputs: Iterable[Path],
     inputs: Iterable[Path] = (), parents: Iterable[Path] = (),
@@ -652,28 +701,41 @@ def write_provenance(
         OSError: If hashing or publication fails.
         ValueError: If stage, ownership, or dependency validation fails.
     """
-    if stage not in _STAGE_NAMES:
-        raise ValueError(f"Unknown provenance stage: {stage}")
-    path = path.resolve()
-    producer = Path(__file__) if producer is None else producer
-    lines = [PROVENANCE_HEADER, f"stage\t{stage}",
-             f"producer\t{sha256_file(producer)}"]
-    for kind, objects in (("I", inputs), ("P", parents), ("O", outputs)):
-        unique = sorted({Path(obj).resolve() for obj in objects}, key=str)
-        for item in unique:
-            if kind == "P":
-                verify_provenance(item)
-            if kind == "O" and item.parent != path.parent:
-                raise ValueError(f"{item}: output is outside manifest folder")
-            name = item.name if kind == "O" else str(item)
-            lines.append(
-                f"{kind}\t{sha256_file(item)}\t{name.encode('utf-8').hex()}"
-            )
-    for sid, folder in sorted((categories or {}).items()):
-        lines.append(
-            f"C\t{sid.encode('utf-8').hex()}\t{folder.encode('utf-8').hex()}"
-        )
-    write_text_atomically(path, "\n".join(lines) + "\n")
+    record = render_provenance(
+        path, stage=stage, outputs=outputs, inputs=inputs,
+        parents=parents, categories=categories, producer=producer,
+    )
+    write_text_atomically(path.resolve(), record)
+
+
+def publication_unchanged(
+    manifest: Path, contents: dict[Path, str], **record: Any
+) -> bool:
+    """Tell whether publishing ``contents`` would change nothing.
+
+    An identical result must not be rewritten or invalidate anything
+    downstream. That holds when every output already holds exactly the
+    new text and the manifest already holds exactly the record that
+    would be written for it.
+
+    Args:
+        manifest: The outputs' provenance record.
+        contents: New text by output path.
+        **record: The other ``write_provenance`` arguments, without
+            ``outputs``.
+
+    Returns:
+        True when the outputs and their record are already current.
+    """
+    try:
+        for path, text in contents.items():
+            if Path(path).read_bytes() != text.encode("utf-8"):
+                return False
+        current = Path(manifest).read_text(encoding="utf-8")
+        return current == render_provenance(
+            manifest, outputs=list(contents), **record)
+    except (OSError, ValueError):
+        return False
 
 
 def invalidate_dependents(

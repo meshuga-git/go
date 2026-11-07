@@ -88,3 +88,24 @@ def test_1_4_cleanup_removes_a_symlinked_output(
     assert done.returncode == 0, done.stderr
     assert not page.is_symlink() and not page.exists()
     assert target.read_bytes() == content
+
+
+QUICK_TJALA = "3\n2\n10\n10\n10\n3\n12\ncluster_1.txt\n0.05\n"
+
+
+def test_1_2_identical_reexport_keeps_downstream_outputs(
+        workflow: Path) -> None:
+    """Task 1.2: an identical cluster re-export deletes nothing."""
+    results = workflow / "clustering_results"
+    for script, stdin in (("samples_by_cluster.py", "1\n1\nN\nExit\n"),
+                          ("tjala.py", QUICK_TJALA),
+                          ("samples_by_signature.py", "1\nExit\n")):
+        done = run_script(results, script, stdin=stdin)
+        assert done.returncode == 0, (script, done.stderr[-2000:])
+    before = golden.snapshot(workflow)
+    assert "clustering_results/tjala_output.txt" in before
+    assert "clustering_results/signature_1.txt" in before
+    done = run_script(results, "samples_by_cluster.py",
+                      stdin="1\n1\nN\nExit\n")
+    assert done.returncode == 0, done.stderr[-2000:]
+    assert golden.snapshot(workflow) == before

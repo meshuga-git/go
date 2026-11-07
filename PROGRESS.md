@@ -78,6 +78,10 @@ request into `main`; each task is one commit.
   matrix, variance, Tjala and dendrogram outputs are byte-identical
   across Linux and Windows. MSVC and MinGW differ only in
   `compute_variances_state.json`, which names the compiler family.
+- Phase 1, task 1.2: the Python exports (cluster files and Tjala's
+  report) now skip an identical result. The C++ engines and the
+  variance preparation still rewrite their outputs; Phase 5's commit
+  (task 5.3) applies the same rule to every stage.
 - Phase 1: provenance records name absolute paths, so a results folder
   that is copied or moved loses the links between its outputs and their
   parents; invalidation then misses them. Phase 5's relative paths and
@@ -111,7 +115,7 @@ request into `main`; each task is one commit.
 | Task | Summary | Status |
 | --- | --- | --- |
 | 1.1 | Remove the deletion that clustering.py runs before its first prompt (lines 1036–1040). Results are... | Done |
-| 1.2 | Compare hashes before replacing an output. An identical result is not rewritten and invalidates nothing... | Not started |
+| 1.2 | Compare hashes before replacing an output. An identical result is not rewritten and invalidates nothing... | Done |
 | 1.3 | Check the pheromone sum with math.fsum against a tolerance that grows with the number of active terms (n·ε). | Done |
 | 1.4 | Remove the symlink refusal from cleanup. | Done |
 | 1.5 | Add a per-process hash memo keyed on path, size, modification time and file ID. | Not started |

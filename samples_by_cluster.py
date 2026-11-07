@@ -28,6 +28,7 @@ from compute_variances import (
     TreeTopology,
     prompt_input,
     provenance_path,
+    publication_unchanged,
     read_tree_states,
     read_tree_topology,
     validate_tree_states,
@@ -285,18 +286,22 @@ def _write_leaf_cluster_file(view: ClusterView) -> Path:
     """
     cluster_filename = Path(f"cluster_{view.node_id}.txt")
     cluster_text = ", ".join(map(str, view.leaf_subclusters)) + "\n"
+    record = {
+        "stage": "cluster_export",
+        "inputs": [Path(TREE_STATES_FILE), Path(TREE_TOPOLOGY_FILE)],
+        "parents": [provenance_path(Path(TREE_STATES_FILE))],
+        "producer": Path(__file__),
+    }
+    manifest = provenance_path(cluster_filename)
+    # An identical export changes nothing, so it keeps its dependents.
+    if publication_unchanged(manifest, {cluster_filename: cluster_text},
+                             **record):
+        return cluster_filename
     invalidate_dependents(
-        [cluster_filename, provenance_path(cluster_filename)],
-        [Path.cwd(), Path.cwd().parent],
+        [cluster_filename, manifest], [Path.cwd(), Path.cwd().parent],
     )
     write_text_atomically(cluster_filename, cluster_text)
-    write_provenance(
-        provenance_path(cluster_filename), stage="cluster_export",
-        outputs=[cluster_filename],
-        inputs=[Path(TREE_STATES_FILE), Path(TREE_TOPOLOGY_FILE)],
-        parents=[provenance_path(Path(TREE_STATES_FILE))],
-        producer=Path(__file__),
-    )
+    write_provenance(manifest, outputs=[cluster_filename], **record)
     return cluster_filename
 
 
@@ -374,14 +379,18 @@ def write_cluster_files(
         output_lines.extend(str(filenames.iloc[index])
             for index in sample_indices)
 
-    write_text_atomically(hierarchy_filename, "\n".join(output_lines) + "\n")
-    write_provenance(
-        provenance_path(hierarchy_filename), stage="cluster_export",
-        outputs=[hierarchy_filename], inputs=[Path(TREE_STATES_FILE),
-            Path(TREE_TOPOLOGY_FILE)],
-        parents=[provenance_path(Path(TREE_STATES_FILE))],
-        producer=Path(__file__),
-    )
+    hierarchy_text = "\n".join(output_lines) + "\n"
+    record = {
+        "stage": "cluster_export",
+        "inputs": [Path(TREE_STATES_FILE), Path(TREE_TOPOLOGY_FILE)],
+        "parents": [provenance_path(Path(TREE_STATES_FILE))],
+        "producer": Path(__file__),
+    }
+    manifest = provenance_path(hierarchy_filename)
+    if not publication_unchanged(
+            manifest, {hierarchy_filename: hierarchy_text}, **record):
+        write_text_atomically(hierarchy_filename, hierarchy_text)
+        write_provenance(manifest, outputs=[hierarchy_filename], **record)
 
     print(
         f"Cluster {view.node_id} has {len(view.leaf_subclusters)} "
