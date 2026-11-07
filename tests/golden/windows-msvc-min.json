@@ -471,7 +471,8 @@
     "build_dendrogram": 0,
     "compute_variances": 0,
     "samples_by_cluster": 0,
-    "tjala": 1
+    "tjala": 0,
+    "samples_by_signature": 0
    },
    "artifacts": {
     "cannot_links.txt": "331f39a1430f70d1aa64518830b49d4cce2aa2ecb3ca78c4d8adce02456af41c",
@@ -787,8 +788,12 @@
     "clustering_results/matrix_values.txt": "699bf2da4cf5a37baeed1f99d1427d5540e85e8defe16f59f624a16f2b2ae9be",
     "clustering_results/prepared.provenance": "1d865340f5713eea60a8aaa742fcb3af0e08cabb29a2156ae79effc1167cc11a",
     "clustering_results/sample_lineages.txt": "bd5465172df9593d96353e3e2d3a0e22beeb84e34bc7d0a9888a27fef2ce8bb7",
+    "clustering_results/signature_1.txt": "e9fe36dbaa18016f9f39aed06f4e5c44bb40520f2a2039170a295cbabc14f06a",
+    "clustering_results/signature_1.txt.provenance": "70a65742634c9e233fd2b4c905860c89a6ed858ce76e11351dab9c563173ff42",
     "clustering_results/term_variances.txt": "c7bba1e29512fc190bd88b2c52404fb05c1f614fc964ccb9872cda53ebdb7ae8",
     "clustering_results/term_variances.txt.provenance": "dde4dc75bef62ab6fdda0501db78d66371152038fd009fa11c890a33f8d0fb76",
+    "clustering_results/tjala_output.txt": "274f53527204038b6686342efeddf8f5bdf88865935075d9e7fdc94c7fac5d8c",
+    "clustering_results/tjala_output.txt.provenance": "45f6a6aed703f1f3375b2bf75ec6901d8557a3ed002cce6c00f98c04e2808024",
     "clustering_results/total_data.csv": "b890b9f61afb95c33f1a0d37b6a91411accd5934b12d7596ebac39753c704e34",
     "clustering_results/total_data.csv.provenance": "6d7d5c43694107fd211ac90818b8b04ca5a80fe62850ebfd20a96f24b47c8cf6",
     "clustering_results/tree_splits.txt": "d473f4d8765b87a2cae9ac15a8568ced62dcab3d1d3b93df4807b2018de83600",
