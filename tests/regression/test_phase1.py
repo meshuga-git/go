@@ -136,3 +136,15 @@ def test_1_5_unchanged_files_are_hashed_once(
     os.replace(replacement, path)
     assert shared.sha256_file(path) != first
     assert len(calls) == 2
+
+
+def test_1_11_json_identifiers_stay_text(tmp_path: Path) -> None:
+    """Task 1.11: JSON input keeps identifiers such as "001" as text."""
+    clustering = _load("clustering")
+    source = tmp_path / "matrix.json"
+    source.write_text(
+        '[{"gene": "001", "S1": 5.25}, {"gene": "010", "S1": 0.1}]',
+        encoding="utf-8")
+    table = clustering._read_json(str(source))
+    assert table["gene"].tolist() == ["001", "010"]
+    assert table["S1"].tolist() == [5.25, 0.1]

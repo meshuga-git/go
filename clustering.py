@@ -250,8 +250,28 @@ def _read_excel(filepath: str) -> pd.DataFrame:
 
 
 def _read_json(filepath: str) -> pd.DataFrame:
-    """Read a JSON file containing records."""
-    return pd.read_json(filepath, orient="records")
+    """Read a JSON array of records, keeping values as written.
+
+    The standard json module parses the file, so no type or date
+    inference applies: identifiers such as "001" remain text, and
+    numbers are read exactly as Python reads them.
+
+    Args:
+        filepath: JSON source holding one object per row.
+
+    Returns:
+        The records as a table, columns in first-seen order.
+
+    Raises:
+        ValueError: If the file is not an array of objects.
+        OSError: If the file cannot be read.
+    """
+    with open(filepath, encoding="utf-8") as stream:
+        records = json.load(stream)
+    if not isinstance(records, list) or not all(
+            isinstance(record, dict) for record in records):
+        raise ValueError(f"{filepath}: expected a JSON array of records")
+    return pd.DataFrame.from_records(records)
 
 
 def _read_stata(filepath: str) -> pd.DataFrame:
