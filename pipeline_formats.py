@@ -102,7 +102,7 @@ def read_tree_topology(path: Path, sample_count: int) -> TreeTopology:
     """
     node_count = tree_node_count(sample_count)
     lines = read_utf8_lines(path)
-    if len(lines) != sample_count or lines[0].split() != ["root", "0"]:
+    if len(lines) != sample_count or lines[0].split(" ") != ["root", "0"]:
         raise ValueError(f"{path}: expected root 0 and N-1 split records")
     active = {0}
     children: dict[int, tuple[int, int]] = {}
@@ -110,7 +110,7 @@ def read_tree_topology(path: Path, sample_count: int) -> TreeTopology:
     creation = {0: 0}
     splits: list[TreeSplit] = []
     for iteration, line in enumerate(lines[1:], 1):
-        fields = line.split()
+        fields = line.split(" ")
         if len(fields) != 5 or fields[0] != "split":
             raise ValueError(f"{path}:{iteration + 1}: invalid split record")
         number, parent, left, right = [
@@ -529,7 +529,7 @@ def read_sample_lineages(
         )
     for number, line in enumerate(rows, start=1):
         source = f"{path.name}:{number}"
-        tokens = line.split()
+        tokens = line.split(" ")
         if len(tokens) < 3:
             raise ValueError(f"{source}: expected sample, count and nodes")
         sample = tokens[0]
@@ -613,7 +613,7 @@ def iter_matrix_rows(
         OSError: If the file cannot be read.
     """
     for number, line in enumerate(iter_utf8_lines(path), start=1):
-        tokens = line.split()
+        tokens = line.split(" ")
         if len(tokens) != sample_count:
             raise ValueError(
                 f"{path.name}:{number}: {len(tokens)} value(s) for "
@@ -1282,6 +1282,9 @@ def read_signature_report(path: Path) -> SignatureReport:
 # People write these lists by hand, so a plus sign and leading zeros
 # are accepted: 017 and +17 both name node 17.
 _LISTED_NODE_RE = re.compile(r"\+?[0-9]+\Z", re.ASCII)
+# Entries are separated by commas, semicolons and ASCII whitespace;
+# any other character, a no-break space included, belongs to an entry.
+_LIST_SEPARATOR_RE = re.compile(r"[,; \t\n]+")
 
 
 def render_cluster_list(node_ids: Iterable[int]) -> str:
@@ -1317,7 +1320,7 @@ def read_cluster_list(path: Path, *, max_node_id: int) -> tuple[int, ...]:
     source = f"cannot-clusters file {str(path)!r}"
     raw = "\n".join(read_utf8_lines(path, allow_blank=True, allow_empty=True))
     node_ids: list[int] = []
-    for token in raw.replace(",", " ").replace(";", " ").split():
+    for token in filter(None, _LIST_SEPARATOR_RE.split(raw)):
         if _LISTED_NODE_RE.fullmatch(token) is None:
             raise ValueError(f"{source}: invalid node ID {token!r}")
         node_id = int(token.lstrip("+"), 10)

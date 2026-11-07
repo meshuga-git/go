@@ -61,6 +61,7 @@ from pipeline_io import (
     TREE_STATES_FILE,
     TREE_TOPOLOGY_FILE,
     invalidate_dependents,
+    is_blank,
     parse_canonical_int,
     parse_decimal_float,
     provenance_path,
@@ -401,9 +402,9 @@ def load_gene_filter(path: str | None) -> set[str] | None:
 
     ``None`` means no filtering, while an empty set means a supplied
     filter file contained no usable gene names. UTF-8 BOMs are accepted,
-    matching the CSV readers. Blank or whitespace-only lines are
-    ignored; whitespace inside an actual gene name is rejected rather
-    than silently stripped.
+    matching the CSV readers. Blank lines (empty, or only ASCII spaces
+    and tabs) are ignored; any other whitespace in a line is rejected
+    rather than silently stripped.
 
     Args:
         path: Allowlist path, or ``None`` for no filter.
@@ -422,7 +423,7 @@ def load_gene_filter(path: str | None) -> set[str] | None:
     for line_number, gene in enumerate(
         read_utf8_lines(Path(path), allow_blank=True, allow_empty=True), 1
     ):
-        if not gene or gene.isspace():
+        if is_blank(gene):
             continue
         validate_name(gene, what="gene name", source=f"{path}:{line_number}")
         genes.add(gene)
@@ -1369,7 +1370,7 @@ def validate_variance_output(path: Path, out_dir: Path) -> None:
     genes = set(read_identifiers(out_dir / MATRIX_GENES_FILE, label="gene"))
     seen: set[tuple[str, int, int]] = set()
     for number, line in enumerate(read_utf8_lines(path), 1):
-        fields = line.split()
+        fields = line.split(" ")
         if len(fields) != 4:
             raise ValueError(f"{path}:{number}: expected four variance fields")
         gene, threshold, operator, variance = fields

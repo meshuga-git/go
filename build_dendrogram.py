@@ -52,6 +52,7 @@ from pipeline_io import (
     RESULTS_DIR,
     TREE_STATES_FILE,
     TREE_TOPOLOGY_FILE,
+    is_blank,
     provenance_path,
     read_utf8_lines,
     verify_artifacts,
@@ -173,7 +174,7 @@ def load_folder_categories(config_paths: list[Path]) -> list[Path]:
             ), file=sys.stderr)
             continue
         for raw in read_utf8_lines(config, allow_blank=True, allow_empty=True):
-            if not raw or raw.isspace():
+            if is_blank(raw):
                 continue
             folder = Path(raw).resolve()
             if not folder.is_dir():

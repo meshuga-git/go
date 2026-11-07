@@ -153,6 +153,14 @@ request into `main`; each task is one commit.
   files sit beside the prepared files in the results folder and are
   already inputs of the prepare stage, so the manifests do not change.
   The history reader checks that rows are sorted by their node history.
+- Task 2.10: a blank record holds only ASCII spaces and tabs, and a
+  record of nothing but control characters (and spaces) is an error
+  wherever blanks are allowed or not; `pipeline_io.is_blank` is the one
+  test. The topology, lineages, matrix and term variances split on a
+  single ASCII space, and the cannot-cluster list on commas,
+  semicolons and ASCII whitespace; a no-break space or any other
+  Unicode whitespace is content that the format then rejects. Report
+  thresholds have used the canonical integer grammar since 2.4.
 - Part 2 runs from copies in `clustering_results`, so the README's copy
   list and the golden harness's `PACKAGE` and `PART2` lists gain the
   core modules.
@@ -263,7 +271,7 @@ request into `main`; each task is one commit.
 | 2.7 | Delete the 10 unused imports and the if True: blocks. | Done |
 | 2.8 | Unit tests for every shared format and grammar: report round trip, Python–C++ grammar agreement, and the... | Not started |
 | 2.9 | Strengthen the format checks: each lineage must follow real parent–child links in the topology and end at... | Done |
-| 2.10 | Make writer and readers agree: each format splits on the exact ASCII separator it names and rejects other... | Not started |
+| 2.10 | Make writer and readers agree: each format splits on the exact ASCII separator it names and rejects other... | Done |
 
 ### Phase 3: Command-line layer
 

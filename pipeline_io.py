@@ -112,6 +112,41 @@ def prompt_input(prompt: str = "") -> str:
     return input()
 
 
+def is_blank(record: str) -> bool:
+    """Tell whether a record holds nothing but ASCII spaces and tabs.
+
+    Other whitespace, such as a no-break space, is content, which the
+    format's own rules then reject.
+
+    Args:
+        record: One record, without its terminator.
+
+    Returns:
+        Whether the record is blank.
+    """
+    return not record.strip(" \t")
+
+
+def _check_record(record: str, *, source: str, allow_blank: bool) -> None:
+    """Apply the rules every text record follows.
+
+    Args:
+        record: One record, without its terminator.
+        source: File and record location for diagnostics.
+        allow_blank: Whether the format permits blank records.
+
+    Raises:
+        ValueError: If the record is a prohibited blank, or holds only
+            control characters and spaces.
+    """
+    if is_blank(record):
+        if not allow_blank:
+            raise ValueError(f"{source}: blank record")
+    elif all(char == " " or unicodedata.category(char) == "Cc"
+             for char in record):
+        raise ValueError(f"{source}: record holds only control characters")
+
+
 def iter_utf8_lines(path: Path) -> Iterator[str]:
     """Yield validated physical UTF-8 records incrementally.
 
@@ -140,8 +175,7 @@ def iter_utf8_lines(path: Path) -> Iterator[str]:
                     line = line[:-1]
             if "\r" in line or "\x00" in line or "\ufeff" in line:
                 raise ValueError(f"{path}:{count}: invalid text transport")
-            if not line or line.isspace():
-                raise ValueError(f"{path}:{count}: blank record")
+            _check_record(line, source=f"{path}:{count}", allow_blank=False)
             yield line
     if count == 0:
         raise ValueError(f"{path}: empty file")
@@ -153,7 +187,8 @@ def read_utf8_lines(
     """Read physical UTF-8 records without inferring missing values.
 
     Accept one initial BOM and LF or CRLF terminators. Reject interior
-    BOMs, lone carriage returns, invalid UTF-8, and prohibited blanks.
+    BOMs, lone carriage returns, invalid UTF-8, prohibited blanks and
+    records that hold only control characters.
 
     Args:
         path: Input text file.
@@ -181,10 +216,8 @@ def read_utf8_lines(
         lines.pop()
     if not lines and not allow_empty:
         raise ValueError(f"{path}: file is empty")
-    if not allow_blank:
-        for number, line in enumerate(lines, 1):
-            if not line or line.isspace():
-                raise ValueError(f"{path}:{number}: blank record")
+    for number, line in enumerate(lines, 1):
+        _check_record(line, source=f"{path}:{number}", allow_blank=allow_blank)
     return lines
 
 

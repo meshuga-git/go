@@ -618,7 +618,8 @@ def load_algorithm_data(
 
     validate_variance_output(Path(file_paths["variances"]), Path(base_path))
     variance_rows = [
-        line.split() for line in read_utf8_lines(Path(file_paths["variances"]))
+        line.split(" ")
+        for line in read_utf8_lines(Path(file_paths["variances"]))
     ]
     variances = pd.DataFrame(variance_rows)
 

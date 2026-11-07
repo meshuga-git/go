@@ -318,3 +318,81 @@ def test_2_9_history_rows_must_be_in_node_order(
     swapped.write_text("\n".join(rows) + "\n", encoding="utf-8")
     with pytest.raises(ValueError, match="not sorted"):
         pipeline_formats.read_tree_states(swapped)
+
+
+def test_2_10_only_ascii_spaces_and_tabs_make_a_record_blank(
+        tmp_path: Path) -> None:
+    """Task 2.10 (C16): control-only records are errors, not blanks."""
+    import compute_variances
+    import pipeline_io
+
+    path = tmp_path / "genes.txt"
+    path.write_text("A\n \t\nB\n", encoding="utf-8")
+    assert pipeline_io.read_utf8_lines(path, allow_blank=True) == [
+        "A", " \t", "B"]
+    assert compute_variances.load_gene_filter(str(path)) == {"A", "B"}
+    for record in ("\x1c", "\x01 \x02", "\x0c"):
+        path.write_text(f"A\n{record}\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="only control characters"):
+            pipeline_io.read_utf8_lines(path, allow_blank=True)
+    # A no-break space is content, which the formats then reject.
+    path.write_text("A\n \n", encoding="utf-8")
+    with pytest.raises(ValueError, match="invalid identifier"):
+        pipeline_io.read_identifiers(path, label="gene")
+    with pytest.raises(ValueError):
+        compute_variances.load_gene_filter(str(path))
+
+
+def test_2_10_formats_split_on_their_exact_separator(
+        workflow: Path, tmp_path: Path) -> None:
+    """Task 2.10 (C16): one ASCII space separates; nothing else does."""
+    import pipeline_formats
+    import pipeline_io
+
+    results = workflow / "clustering_results"
+    count = len(pipeline_io.read_utf8_lines(results / "filenames.txt"))
+    samples = pipeline_io.read_identifiers(results / "matrix_samples.txt",
+                                           label="sample")
+    readers = {
+        "tree_splits.txt": lambda path: pipeline_formats.read_tree_topology(
+            path, count),
+        "sample_lineages.txt": lambda path: (
+            pipeline_formats.read_sample_lineages(path, samples)),
+        "matrix_values.txt": lambda path: list(
+            pipeline_formats.iter_matrix_rows(path, len(samples))),
+    }
+    for name, read in readers.items():
+        text = (results / name).read_text(encoding="utf-8")
+        read(results / name)
+        for separator in ("\t", "  ", " ", " "):
+            changed = tmp_path / name
+            changed.write_text(text.replace(" ", separator, 1),
+                               encoding="utf-8")
+            with pytest.raises(ValueError):
+                read(changed)
+
+    listed = tmp_path / "cluster.txt"
+    listed.write_text("1,\t2;3\n4 ,5", encoding="utf-8")
+    assert pipeline_formats.read_cluster_list(listed, max_node_id=9) == (
+        1, 2, 3, 4, 5)
+    listed.write_text("1 2", encoding="utf-8")
+    with pytest.raises(ValueError, match="invalid node ID"):
+        pipeline_formats.read_cluster_list(listed, max_node_id=9)
+
+
+def test_2_10_report_thresholds_are_canonical_integers() -> None:
+    """Task 2.10 (C16): thresholds are no longer read with float()."""
+    import pipeline_formats as formats
+
+    report = formats.SignatureReport(
+        (formats.Signature(1, "convergence",
+                           (formats.SignatureTerm("G1", "<", 64),),
+                           (formats.ClusterCoverage("2", 50.0),), ()),),
+        formats.RunSummary("no_active_terms_remaining", 1, 2, 3, 4, 5),
+    )
+    lines = formats.render_signature_report(report).split("\n")[:-1]
+    assert formats.parse_signature_report(lines, source="r") == report
+    for threshold in ("64.0", "6.4e1", "+64", "064", "６４"):
+        changed = [line.replace("< 64", f"< {threshold}") for line in lines]
+        with pytest.raises(ValueError):
+            formats.parse_signature_report(changed, source="r")
