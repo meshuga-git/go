@@ -17,6 +17,14 @@ request into `main`; each task is one commit.
 
 ## Agreed in conversation
 
+- Versions: the package runs with any Python, library and compiler
+  version that supports its functionality; the versions installed on
+  any one machine, and its system language, play no part.
+  `requirements.txt` states the minimal versions. CI tests the minimal
+  versions, or the closest newer ones available, and randomly chosen
+  newer versions. The plan's constraints and task 0.1 now say so.
+- Every defect is fixed as soon as possible. The macOS build failure
+  found in Phase 0 is task 1.13 in Phase 1.
 - Python 3.10 is a ceiling: the code uses nothing newer. Each module
   docstring states the minimum version vermin reports for it, raised to
   what the pinned packages need where that is higher. The plan's
@@ -39,22 +47,31 @@ request into `main`; each task is one commit.
 
 ## Findings
 
-- Phase 0: on the 300-sample timing set under Python 3.10 (NumPy
-  2.2.6), Tjala stops with "Normalized pheromones do not sum to 1.0:
-  0.9999999999986108" once 839,930 terms are active. Under Python 3.14
-  (NumPy 2.5.4) the same check passes and Tjala finishes with two
-  signatures: whether a run survives depends on how the NumPy version
-  rounds the sum. The golden files record both outcomes as today's
-  behavior; task 1.3 replaces the exact check, and that commit
-  re-records the timing set.
+- Phase 0: on the 300-sample timing set under Python 3.10, Tjala stops
+  with "Normalized pheromones do not sum to 1.0: 0.9999999999986108"
+  once 839,930 terms are active. Under Python 3.14 the same check passes
+  and Tjala finishes with two signatures. The cause is Python's built-in
+  `sum()`, which compensates rounding only from Python 3.12 on, as the
+  register's C12 says; the NumPy version plays no part. The golden
+  files record the failure as today's behavior; task 1.3 replaces the
+  check and re-records the timing set.
 - Phase 0: every other scenario gives byte-identical results with GCC
   and Clang under both Python 3.10 and 3.14.
+- Phase 0, versions: the oldest releases that work on Python 3.10 are
+  NumPy 1.21.2 and SciPy 1.7.2 (the first with wheels for 3.10), pandas
+  1.5.0 (`to_csv(lineterminator=)`) and Plotly 4.0.0
+  (`plotly.graph_objects`). With them, every quick scenario passes and
+  every artifact matches the results of the newest releases, except
+  `dendrogram.html`, which embeds Plotly's own library. The newest
+  releases (Python 3.14, NumPy 2.5.4, pandas 3.1.1, SciPy 1.18.1, Plotly
+  7.1.0) also pass. A headless browser loads the dendrogram built with
+  Plotly 4.0.0 without errors.
 - Phase 0: on macOS, Apple Clang 17 rejects floating-point
   `std::from_chars` ("call to deleted function"), so today's
   `run_clustering.cpp` (line 290) and `reconstruct_hierarchy.cpp` (line
   287) do not compile and the pipeline cannot run there. The macOS
-  golden files record those build failures as today's behavior. No
-  plan task covers this yet.
+  golden files record those build failures as today's behavior; task
+  1.13 fixes them.
 - Phase 0: Windows (MSVC and MinGW-w64 GCC 16) runs every scenario.
   Its results differ from Linux only in files that hold sample paths
   and in the provenance records that hash them; the tree, iteration,
@@ -78,7 +95,7 @@ request into `main`; each task is one commit.
 
 | Task | Summary | Status |
 | --- | --- | --- |
-| 0.1 | Tag the current code as the baseline. Pin the package versions in use in requirements.txt, and record the... | Done |
+| 0.1 | Tag the current code as the baseline. State in requirements.txt the minimal version of each library... | Done |
 | 0.2 | Golden datasets in tests/data/: the 22-sample synthetic set, five random trees whose paths contain commas,... | Done |
 | 0.3 | Golden outputs: the SHA-256 of every artifact the current code writes, per toolchain (MSVC, MinGW GCC,... | Done |
 | 0.4 | tests/golden.py drives every script non-interactively, feeding its answers on stdin, and compares the hashes. | Done |
@@ -100,6 +117,7 @@ request into `main`; each task is one commit.
 | 1.10 | Cannot-cluster list: accept 017 and +17. With a manifest, check that it was exported from the current... | Not started |
 | 1.11 | Read JSON input with type inference off, so identifiers such as "001" stay text. | Not started |
 | 1.12 | Reject a duplicate sample header in any input format before pandas renames it, naming the file and the header. | Not started |
+| 1.13 | Build on macOS: replace floating-point std::from_chars, which Apple Clang's library rejects, so that... | Not started |
 
 ### Phase 2: Shared core
 

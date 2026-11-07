@@ -4,10 +4,19 @@ Requires Python 3.10 or newer.
 
 Each scenario copies the package into a fresh work folder, drives every
 script non-interactively by feeding its answers on stdin, and records
-the SHA-256 of every file the scripts write. Results are kept per
-toolchain and Python version in ``tests/golden/<key>.json``, where
-``<key>`` is ``<toolchain>-py<major><minor>``. Tjala runs under a seed
+the SHA-256 of every file the scripts write. Tjala runs under a seed
 fixed by this harness; the program itself stays unseeded.
+
+The golden file of a toolchain, ``tests/golden/<toolchain>-min.json``,
+is recorded with the minimal versions: Python 3.10 and the oldest
+library releases that requirements.txt allows. A run in that
+environment must reproduce it byte for byte. A run with any other
+versions is checked with ``--compat``: every stage that passes in the
+golden file must pass, and every artifact must match, except
+``dendrogram.html`` and its provenance record, which embed the Plotly
+library itself. Where the golden run failed a stage that passes in the
+new environment, the artifacts that stage would have written are not
+compared.
 
 Content that depends on the machine rather than on the code is
 normalized before hashing:
@@ -18,15 +27,21 @@ normalized before hashing:
   folder becomes ``nh:`` plus that file's normalized hash, or
   ``<BINARY>`` for a compiled executable. Recorded hashes are still
   checked, but no longer depend on the folder or the compiler build.
-* The compiler path in ``compute_variances_state.json`` becomes
-  ``<COMPILER>``, and the random element id Plotly writes into
-  ``dendrogram.html`` becomes ``<UUID>``.
+* Fields that identify code rather than results become placeholders:
+  the producer line of a provenance record, which hashes the script
+  that wrote it, becomes ``<PRODUCER>``, and the compiler path and
+  source hashes in ``compute_variances_state.json`` become ``<CODE>``.
+  They change with every edit of the code, while the outputs they
+  vouch for are compared in full.
+* The random element id Plotly writes into ``dendrogram.html`` becomes
+  ``<UUID>``.
 
 Child Python processes run with ``PYTHONIOENCODING=utf-8``, as an
 interactive console would give them, and without bytecode caches.
 
 Usage:
     python tests/golden.py --toolchain linux-gcc            # compare
+    python tests/golden.py --toolchain linux-gcc --compat   # other libs
     python tests/golden.py --toolchain linux-gcc --record   # record
     python tests/golden.py --toolchain linux-gcc --measure FILE
 
@@ -72,6 +87,9 @@ BINARY_NAMES = {
 }
 BINARY_SUFFIXES = {".obj", ".o", ".pdb", ".ilk", ".exp", ".lib"}
 EXE = ".exe" if os.name == "nt" else ""
+PACKAGES = ("numpy", "pandas", "scipy", "plotly")
+# Artifacts that embed a library, not results; --compat skips them.
+VERSION_DEPENDENT = {"dendrogram.html", "dendrogram.html.provenance"}
 TJALA_SEED = 20261106
 STAGE_TIMEOUT = 3600
 
@@ -94,7 +112,10 @@ HEX64 = re.compile(r"\b[0-9a-f]{64}\b")
 UUID = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 )
-COMPILER_FIELD = re.compile(r'("compiler"\s*:\s*)"(?:[^"\\]|\\.)*"')
+CODE_FIELDS = re.compile(
+    r'("(compiler|source_sha256|artifact_header_sha256)"\s*:\s*)'
+    r'"(?:[^"\\]|\\.)*"'
+)
 # The script's own --seed option fixes its otherwise random colors.
 DENDROGRAM_SEED = "7"
 
@@ -325,7 +346,7 @@ class Normalizer:
         if name.endswith(".provenance"):
             text = self._decode_provenance(text)
         if name == "compute_variances_state.json":
-            text = COMPILER_FIELD.sub(r'\1"<COMPILER>"', text)
+            text = CODE_FIELDS.sub(r'\1"<CODE>"', text)
         if name.endswith(".html"):
             text = UUID.sub("<UUID>", text)
         text = HEX64.sub(self._hash_token, text)
@@ -339,7 +360,9 @@ class Normalizer:
         lines = []
         for line in text.split("\n"):
             fields = line.split("\t")
-            if fields[0] in ("I", "O", "P") and len(fields) == 3:
+            if fields[0] == "producer" and len(fields) == 2:
+                fields[1] = "<PRODUCER>"
+            elif fields[0] in ("I", "O", "P") and len(fields) == 3:
                 fields[2] = "path:" + _unhex(fields[2])
             elif fields[0] == "C" and len(fields) == 3:
                 fields[1] = "name:" + _unhex(fields[1])
@@ -536,7 +559,7 @@ class Runner:
             "python": platform.python_version(),
             "platform": platform.platform(),
         }
-        for package in ("numpy", "pandas", "scipy", "plotly"):
+        for package in PACKAGES:
             try:
                 module = __import__(package)
                 info[package] = module.__version__
@@ -557,29 +580,51 @@ class Runner:
         return info
 
 
-def compare(expected: dict, actual: dict) -> list[str]:
+def compare(expected: dict, actual: dict,
+            compat: bool = False) -> tuple[list[str], list[str]]:
     """List the differences between two scenario results.
 
     Args:
         expected: Recorded result.
         actual: New result.
+        compat: Whether to apply the rules for other library versions
+            (see the module docstring).
 
     Returns:
-        One line per difference; empty when they match.
+        Differences that count as failures, and notes that do not.
     """
-    problems = []
-    if expected["stages"] != actual["stages"]:
-        problems.append(f"stage exit codes {actual['stages']} "
-                        f"!= {expected['stages']}")
+    problems: list[str] = []
+    notes: list[str] = []
     want, got = expected["artifacts"], actual["artifacts"]
+    allow_extra = False
+    if expected["stages"] != actual["stages"]:
+        message = (f"stage exit codes {actual['stages']} "
+                   f"!= {expected['stages']}")
+        newly_passing = [
+            stage for stage, code in expected["stages"].items()
+            if code != 0 and actual["stages"].get(stage) == 0
+        ]
+        newly_failing = [
+            stage for stage, code in expected["stages"].items()
+            if code == 0 and actual["stages"].get(stage, 1) != 0
+        ]
+        if compat and newly_passing and not newly_failing:
+            notes.append(f"passes {', '.join(newly_passing)}, which "
+                         "fails in the golden run")
+            allow_extra = True
+        else:
+            problems.append(message)
     for rel in sorted(set(want) | set(got)):
+        if compat and rel.rsplit("/", 1)[-1] in VERSION_DEPENDENT:
+            continue
         if rel not in got:
             problems.append(f"missing  {rel}")
         elif rel not in want:
-            problems.append(f"extra    {rel}")
+            if not allow_extra:
+                problems.append(f"extra    {rel}")
         elif want[rel] != got[rel]:
             problems.append(f"changed  {rel}")
-    return problems
+    return problems, notes
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -600,6 +645,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="leave out the timing set")
     parser.add_argument("--record", action="store_true",
                         help="write the results as the new golden file")
+    parser.add_argument("--compat", action="store_true",
+                        help="compare as for library versions other than "
+                             "the minimal ones")
     parser.add_argument("--allow-missing", action="store_true",
                         help="exit with 0 when no golden file exists yet")
     parser.add_argument("--measure", type=Path, metavar="FILE",
@@ -612,7 +660,7 @@ def main(argv: list[str] | None = None) -> int:
                              "failed stage")
     args = parser.parse_args(argv)
 
-    key = f"{args.toolchain}-py{sys.version_info[0]}{sys.version_info[1]}"
+    key = f"{args.toolchain}-min"
     selected = [s for s in scenarios.values()
                 if (args.only is None or s.name in args.only)
                 and not (args.skip_slow and s.slow)]
@@ -626,6 +674,17 @@ def main(argv: list[str] | None = None) -> int:
 
     runner = Runner(args.toolchain, args.work.resolve(), bool(args.measure))
     environment = runner.environment()
+    if comparing and not args.compat:
+        recorded_env = golden.get("environment", {})
+        changed = [name for name in PACKAGES
+                   if environment.get(name) != recorded_env.get(name)]
+        minor = str(recorded_env.get("python", "")).split(".")[:2]
+        if environment["python"].split(".")[:2] != minor:
+            changed.insert(0, "python")
+        if changed:
+            print("Note: this environment differs from the golden run in "
+                  f"{', '.join(changed)}; use --compat unless the "
+                  "minimal versions are installed.")
     outcomes: dict[str, dict] = {}
     differing = 0
     for scenario in selected:
@@ -639,9 +698,9 @@ def main(argv: list[str] | None = None) -> int:
             print("  no recorded result for this scenario")
             differing += 1
             continue
-        problems = compare(recorded, outcome)
+        problems, notes = compare(recorded, outcome, args.compat)
         differing += bool(problems)
-        for line in problems or ["matches the golden result"]:
+        for line in notes + (problems or ["matches the golden result"]):
             print(f"  {line}")
 
     stored = {
@@ -655,6 +714,7 @@ def main(argv: list[str] | None = None) -> int:
         # Failure logs help diagnose a run on another machine, but
         # depend on its paths, so golden files leave them out.
         report = json.loads(json.dumps(stored))
+        report["compat"] = args.compat
         for name, outcome in outcomes.items():
             if "failure" in outcome:
                 report["scenarios"][name]["failure"] = outcome["failure"]
