@@ -28,19 +28,32 @@ import argparse
 import hashlib
 import json
 import logging
-import ntpath
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, TypedDict, cast
 
 import numpy as np
 import pandas as pd
 
+# Format readers now live in pipeline_formats; they are re-exported
+# here until every script imports them from there (task 2.4).
+from pipeline_formats import (  # noqa: F401
+    INT32_INFO,
+    SampleLineages,
+    TreeSplit,
+    TreeTopology,
+    _tree_node_count,
+    load_tree_states,
+    read_sample_expression,
+    read_tree_states,
+    read_tree_topology,
+    sample_id,
+    validate_tree_states,
+)
 # Shared names now live in pipeline_io; they are re-exported here
 # until every script imports them from there (task 2.4).
 from pipeline_io import (  # noqa: F401
@@ -93,10 +106,6 @@ VARIANCE_SOURCE_FILE = "compute_variances.cpp"
 VARIANCE_STATE_FILE = "compute_variances_state.json"
 EXECUTABLE_STEM = "compute_variances"
 STATE_SCHEMA_VERSION = 2
-
-INT32_INFO = np.iinfo(np.int32)
-
-SampleLineages = dict[str, tuple[int, ...]]
 
 
 class BuildState(TypedDict):
@@ -163,22 +172,6 @@ class VarianceStageState(TypedDict, total=False):
 # ======================================================================
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def prompt_input(prompt: str = "") -> str:
     """Display an interactive prompt on stderr and read one response.
 
@@ -196,228 +189,9 @@ def prompt_input(prompt: str = "") -> str:
     return input()
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-@dataclass(frozen=True)
-class TreeSplit:
-    """One immutable binary-tree split.
-
-    Attributes:
-        iteration: One-based global split number.
-        parent: Retired immutable parent ID.
-        retained_child: Fresh retained-child ID.
-        extracted_child: Fresh extracted-child ID.
-    """
-
-    iteration: int
-    parent: int
-    retained_child: int
-    extracted_child: int
-
-
-@dataclass(frozen=True)
-class TreeTopology:
-    """A validated immutable topology shared by pipeline consumers.
-
-    Attributes:
-        root: Permanent root ID, always zero.
-        splits: Splits in global iteration order.
-        children: Parent IDs mapped to retained/extracted children.
-        parent_by_node: Child IDs mapped to their immediate parent.
-        creation_split: Split creating each node; root maps to zero.
-        leaves: Terminal immutable IDs in numeric order.
-        node_count: Total immutable node count.
-    """
-
-    root: int
-    splits: tuple[TreeSplit, ...]
-    children: dict[int, tuple[int, int]]
-    parent_by_node: dict[int, int]
-    creation_split: dict[int, int]
-    leaves: tuple[int, ...]
-    node_count: int
-
-
-def read_tree_topology(path: Path, sample_count: int) -> TreeTopology:
-    """Parse canonical topology records and validate every split.
-
-    Args:
-        path: Authoritative ``tree_splits.txt`` file.
-        sample_count: Number of samples and terminal leaves.
-
-    Returns:
-        Complete topology with one root and two fresh children per
-        split.
-
-    Raises:
-        ValueError: If syntax, allocation, or active-node invariants
-            fail.
-        OSError: If reading fails.
-    """
-    node_count = _tree_node_count(sample_count)
-    lines = read_utf8_lines(path)
-    if len(lines) != sample_count or lines[0].split() != ["root", "0"]:
-        raise ValueError(f"{path}: expected root 0 and N-1 split records")
-    active = {0}
-    children: dict[int, tuple[int, int]] = {}
-    parents: dict[int, int] = {}
-    creation = {0: 0}
-    splits: list[TreeSplit] = []
-    for iteration, line in enumerate(lines[1:], 1):
-        fields = line.split()
-        if len(fields) != 5 or fields[0] != "split":
-            raise ValueError(f"{path}:{iteration + 1}: invalid split record")
-        number, parent, left, right = [
-            parse_canonical_int(token, source=f"{path}:{iteration + 1}")
-            for token in fields[1:]
-        ]
-        if number != iteration or (left, right) != (
-            2 * iteration - 1, 2 * iteration
-        ) or parent not in active:
-            raise ValueError(
-                f"{path}:{iteration + 1}: invalid immutable split")
-        active.remove(parent)
-        active.update((left, right))
-        children[parent] = (left, right)
-        parents[left] = parents[right] = parent
-        creation[left] = creation[right] = iteration
-        splits.append(TreeSplit(iteration, parent, left, right))
-    return TreeTopology(
-        0, tuple(splits), children, parents, creation,
-        tuple(sorted(active)), node_count
-    )
-
-
-def read_tree_states(path: Path) -> pd.DataFrame:
-    """Decode strict, compressed immutable hierarchy history.
-
-    Args:
-        path: Headerless ``total_data.csv`` file.
-
-    Returns:
-        Paths followed by N integer state columns, with string labels.
-
-    Raises:
-        ValueError: If dimensions, paths, blanks, or node fields are
-            invalid.
-        OSError: If reading fails.
-    """
-    rows = read_csv_rows(path)
-    count = len(rows)
-    node_count = _tree_node_count(count)
-    states = np.empty((count, count), dtype=np.int64)
-    paths: list[str] = []
-    ids: set[str] = set()
-    for row_index, row in enumerate(rows):
-        if len(row) != count + 1 or not row[0]:
-            raise ValueError((
-                f'{path}:{row_index + 1}: expected path and N '
-                f'states'
-            ))
-        sid = sample_id(row[0])
-        validate_identifier(sid, source=f"{path}:{row_index + 1}")
-        if sid in ids:
-            raise ValueError((
-                f'{path}:{row_index + 1}: duplicate sample ID '
-                f'{sid!r}'
-            ))
-        ids.add(sid)
-        paths.append(row[0])
-        for column, token in enumerate(row[1:]):
-            if token == "" and row_index:
-                value = int(states[row_index - 1, column])
-            else:
-                value = parse_canonical_int(
-                    token, source=f"{path}:{row_index + 1}:{column + 2}"
-                )
-            if not 0 <= value < node_count:
-                raise ValueError(
-                    f"{path}:{row_index + 1}:{column + 2}: bad node ID")
-            states[row_index, column] = value
-    if not np.all(states[:, 0] == 0):
-        raise ValueError(f"{path}: state 0 must contain root 0")
-    if set(np.unique(states)) != set(range(node_count)):
-        raise ValueError(f"{path}: history omits immutable nodes")
-    if len(set(states[:, -1])) != count:
-        raise ValueError(f"{path}: terminal sample leaves must be distinct")
-    data = pd.DataFrame(states, columns=[str(i) for i in range(1, count + 1)])
-    data.insert(0, "0", paths)
-    return data
-
-
-def validate_tree_states(data: pd.DataFrame, topology: TreeTopology) -> None:
-    """Cross-check every sample transition against authoritative.
-
-    Cross-check every sample transition against the authoritative tree.
-
-    Args:
-        data: Decoded path-plus-state table in sample order.
-        topology: Tree topology for the same samples.
-
-    Raises:
-        ValueError: If dimensions or any split transition disagree.
-    """
-    states = data.iloc[:, 1:].to_numpy(dtype=np.int64)
-    count = len(data)
-    if states.shape != (count, count) or topology.node_count != 2 * count - 1:
-        raise ValueError("History and topology dimensions disagree")
-    if not np.all(states[:, 0] == 0):
-        raise ValueError("History state 0 must contain root 0")
-    for split in topology.splits:
-        previous = states[:, split.iteration - 1]
-        current = states[:, split.iteration]
-        mask = previous == split.parent
-        if not mask.any() or np.any(current[~mask] != previous[~mask]):
-            raise ValueError((
-                f'History changes wrong samples at split '
-                f'{split.iteration}'
-            ))
-        if set(current[mask]) != {split.retained_child, split.extracted_child}:
-            raise ValueError((
-                f'History has wrong children at split '
-                f'{split.iteration}'
-            ))
-    if set(states[:, -1]) != set(topology.leaves):
-        raise ValueError("History terminal nodes disagree with topology")
-
-
 # ======================================================================
 # Block 1: Small Utilities
 # ======================================================================
-def sample_id(raw_path: str) -> str:
-    """Derive a sample identifier from a manifest path.
-
-    Manifest paths may use Windows separators even when the script runs
-    on POSIX, so ``ntpath.basename`` is used unconditionally.
-
-    Args:
-        raw_path: Path string stored in the manifest.
-
-    Returns:
-        The final path component, interpreted with Windows path
-        semantics.
-    """
-    return ntpath.basename(raw_path)
 
 
 def validate_name(name: str, *, what: str, source: str) -> None:
@@ -463,10 +237,6 @@ def resolve_sample_path(raw_path: str, data_dir: Path) -> Path:
         f"Could not locate sample file for manifest entry {raw_path!r}: "
         f"tried {literal} and {candidate}"
     )
-
-
-
-
 
 
 def input_hashes(directory: Path) -> dict[str, str]:
@@ -743,111 +513,9 @@ def _parse_hierarchy_id(
     return node_id
 
 
-def _tree_node_count(sample_count: int) -> int:
-    """Return number of nodes in a full binary tree with N leaves.
-
-    Return the number of nodes in a full binary tree with N leaves.
-
-    Args:
-        sample_count: Number of samples/leaves in the clustering tree.
-
-    Returns:
-        ``2 * sample_count - 1`` for a non-empty tree.
-
-    Raises:
-        ValueError: If ``sample_count`` is not positive or the largest
-            node ID cannot be represented by the signed 32-bit
-            downstream contract.
-    """
-    if sample_count <= 0:
-        raise ValueError("sample_count must be positive")
-
-    node_count = 2 * sample_count - 1
-    max_node_id = node_count - 1
-    if max_node_id > int(INT32_INFO.max):
-        raise ValueError(
-            (
-                f'A fully immutable tree for {sample_count} '
-                f'samples requires node ID {max_node_id}, '
-                f'exceeding the signed 32-bit hierarchy contract'
-            )
-        )
-    return node_count
-
-
-def load_tree_states(
-    tree_states_path: Path,
-) -> tuple[SampleLineages, list[str]]:
-    """Load and validate sample memberships in the immutable tree.
-
-    ``reconstruct_hierarchy.cpp`` writes one path and N compressed state
-    columns for N samples. Only empty fields repeat the preceding value.
-    Validate every transition against the accompanying tree topology.
-
-    Args:
-        tree_states_path: Headerless ``total_data.csv`` history path.
-
-    Returns:
-        Sample-ID-to-lineage mapping and paths in history row order.
-
-    Raises:
-        ValueError: If history, identities, or topology are
-            inconsistent.
-        OSError: If either input cannot be read.
-    """
-    data = read_tree_states(tree_states_path)
-    topology = read_tree_topology(
-        tree_states_path.with_name(TREE_TOPOLOGY_FILE), len(data)
-    )
-    validate_tree_states(data, topology)
-    hierarchy: SampleLineages = {}
-    raw_paths: list[str] = []
-    for row in data.itertuples(index=False, name=None):
-        raw = str(row[0])
-        hierarchy[sample_id(raw)] = (
-            tuple(dict.fromkeys(int(x) for x in row[1:]))
-        )
-        raw_paths.append(raw)
-    return hierarchy, raw_paths
-
-
 # ======================================================================
 # Block 3: Expression Matrix
 # ======================================================================
-def _read_sample_expression(resolved: Path, sid: str) -> pd.Series:
-    """Read one per-sample CSV using the strict pipeline dialect.
-
-    Args:
-        resolved: Existing CSV path.
-        sid: Sample ID assigned at ingestion and validated globally.
-
-    Returns:
-        Binary64 values indexed by literal, unique gene identifiers.
-
-    Raises:
-        ValueError: If headers, fields, names, or expressions are
-            invalid.
-        OSError: If the file cannot be read.
-    """
-    rows = read_csv_rows(resolved)
-    if rows[0] != ["gene", "expression"] or len(rows) < 2:
-        raise ValueError(f"{resolved}: expected gene,expression and data rows")
-    genes: list[str] = []
-    values: list[float] = []
-    seen: set[str] = set()
-    for number, row in enumerate(rows[1:], 2):
-        if len(row) != 2:
-            raise ValueError(
-                f"{resolved}:{number}: expected exactly two fields")
-        gene, token = row
-        validate_identifier(gene, source=f"{resolved}:{number}:1")
-        if gene in seen:
-            raise ValueError(f"{resolved}:{number}: duplicate gene {gene!r}")
-        seen.add(gene)
-        genes.append(gene)
-        values.append(parse_decimal_float(token,
-            source=f"{resolved}:{number}:2"))
-    return pd.Series(values, index=genes, name=sid, dtype=np.float64)
 
 
 def build_matrix(raw_paths: Iterable[str], data_dir: Path) -> pd.DataFrame:
@@ -871,7 +539,7 @@ def build_matrix(raw_paths: Iterable[str], data_dir: Path) -> pd.DataFrame:
     for raw_path in raw_paths:
         sid = sample_id(raw_path)
         resolved = resolve_sample_path(raw_path, data_dir)
-        series_by_sample[sid] = _read_sample_expression(resolved, sid)
+        series_by_sample[sid] = read_sample_expression(resolved, sid)
         folders.setdefault(str(resolved.parent), []).append(sid)
 
     matrix = pd.DataFrame(series_by_sample)

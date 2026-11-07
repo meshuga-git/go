@@ -37,6 +37,7 @@ The pipeline is intended to work on Windows and POSIX systems (e.g., Linux and m
    compute_variances.cpp
    pipeline_files.hpp
    compute_variances.py
+   pipeline_formats.py
    pipeline_io.py
    samples_by_cluster.py
    reconstruct_hierarchy.cpp
@@ -121,6 +122,7 @@ The pipeline is intended to work on Windows and POSIX systems (e.g., Linux and m
    compute_variances.py
    compute_variances.cpp
    pipeline_files.hpp
+   pipeline_formats.py
    pipeline_io.py
    samples_by_cluster.py
    tjala.py

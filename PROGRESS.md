@@ -64,6 +64,52 @@ request into `main`; each task is one commit.
   in the per-user cache folder; `.exe` only on Windows; compiler output
   streams live. `reconstruct_hierarchy` is built and run through its
   command line until Phase 4 moves the history to Python.
+- Format inventory for 2.2 and 2.4 (where each reader and writer lives
+  today; 2.2 moves or builds the canonical one in pipeline_formats,
+  2.4 switches the callers and deletes the rest):
+  - topology: `read_tree_topology` (moved); wrappers
+    `build_dendrogram.load_tree_topology`,
+    `samples_by_cluster.load_tree_topology`,
+    `clustering._load_tree_topology`.
+  - history: `read_tree_states`, `validate_tree_states`,
+    `load_tree_states` (moved); `samples_by_cluster.load_tree_states`
+    and `validate_history_against_topology`,
+    `build_dendrogram._decode_tree_states`,
+    `compute_variances._parse_hierarchy_id`; writer
+    `render_tree_states` (new, matches reconstruct_hierarchy on every
+    golden case).
+  - snapshots: `read_snapshots` (new); `clustering._read_iteration_assignments`
+    and `_validate_clustering_outputs`.
+  - lineages: writer in `compute_variances._write_staged_inputs`
+    ("sample count id..." in root-to-leaf order); readers
+    `samples_by_signature.load_sample_lineages`, inline in
+    `tjala.load_algorithm_data`.
+  - matrix: writer `_write_staged_inputs` (int32, space-separated, one
+    row per gene); readers `samples_by_signature.load_expression_values`
+    (streams, keeps selected rows), inline in `tjala.load_algorithm_data`.
+  - signature report: writer `tjala._format_*` and `_write_text_atomically`;
+    parser `samples_by_signature.parse_antecedent`,
+    `_parse_cluster_section`, `parse_signature_block`, `load_signatures`;
+    canonical `render_signature_report` and `read_signature_report`
+    (new; every golden report reads back and re-renders byte for
+    byte).
+  - cannot-cluster list: writer `samples_by_cluster._write_leaf_cluster_file`;
+    reader inline in `tjala.load_algorithm_data`; canonical
+    `render_cluster_list` and `read_cluster_list` (new, with the
+    hand-written forms task 1.10 accepts).
+  - per-sample CSV: writer inside `clustering.write_sample_csvs`; reader
+    `read_sample_expression` (moved); canonical writer
+    `render_sample_expression` (new, reproduces every golden CSV).
+- The report parser accepts exactly what the writer produces: the
+  signatures with their stop reason, conditions, both cluster sections
+  and the optional scaling section, then the run summary, whose
+  signature count must agree. Lines are compared without stripping,
+  thresholds are canonical integers within int32 (they are observed
+  matrix values), percentages have one decimal and lie in 0.0..100.0,
+  and scaled thresholds are written as Python writes floats. The
+  writer parses its own text back before returning it. So the report
+  meets task 2.10's rules from the start; they take effect when 2.4
+  moves `samples_by_signature.py` onto this parser.
 - Part 2 runs from copies in `clustering_results`, so the README's copy
   list and the golden harness's `PACKAGE` and `PART2` lists gain the
   core modules.
@@ -161,7 +207,7 @@ request into `main`; each task is one commit.
 | Task | Summary | Status |
 | --- | --- | --- |
 | 2.1 | Create pipeline_io.py from Block 0 of compute_variances.py: constants and artifact owners, UTF-8 and CSV... | Done |
-| 2.2 | Create pipeline_formats.py: topology, snapshots, history reader and validator, lineages, the matrix... | Not started |
+| 2.2 | Create pipeline_formats.py: topology, snapshots, history reader and validator, lineages, the matrix... | Done |
 | 2.3 | Create pipeline_native.py from the MSVC-capable helper in compute_variances.py, adding vswhere, MinGW and... | Not started |
 | 2.4 | Switch every script to the core and delete what it replaces: five writers, four duplicate readers, three... | Not started |
 | 2.5 | Make producer a required argument of the manifest writer. | Not started |
