@@ -3,19 +3,33 @@
 ## Golden tests
 
 `tests/golden.py` runs every pipeline script on the golden datasets and
-compares the SHA-256 of every file the scripts write with the hashes
-recorded in `tests/golden/<toolchain>-py<major><minor>.json`. Any change
-that is not backed by a decision record must leave them identical.
+compares the SHA-256 of every file the scripts write with the hashes in
+`tests/golden/<toolchain>-min.json`. Any change that is not backed by a
+decision record or a plan task must leave them identical.
 
-Set up an environment with the pinned packages first:
+The golden files are recorded with the minimal versions: Python 3.10
+and the oldest library releases `requirements.txt` allows. To compare
+byte for byte, create that environment:
 
 ```text
-python -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt        # POSIX
-.venv\Scripts\python -m pip install -r requirements.txt    # Windows
+python3.10 -m venv .venv
+.venv/bin/python -m pip install uv                       # POSIX
+.venv/bin/python -m uv pip install --resolution lowest-direct --only-binary :all: -r requirements.txt
+.venv\Scripts\python -m pip install uv                   # Windows
+.venv\Scripts\python -m uv pip install --resolution lowest-direct --only-binary :all: -r requirements.txt
 ```
 
-Then run the scenarios with the toolchain of the machine:
+With any other Python or library versions, add `--compat`: every stage
+that passes in the golden run must pass, and every artifact must match
+except `dendrogram.html` and its provenance record, which embed the
+Plotly library itself.
+
+`python tests/random_env.py SEED` installs randomly chosen releases
+newer than the minimums into the current environment; CI uses it,
+under a randomly chosen newer Python, for the second run of each
+toolchain.
+
+Run the scenarios with the toolchain of the machine:
 
 | Toolchain | Compilers it uses |
 | --- | --- |
@@ -26,8 +40,9 @@ Then run the scenarios with the toolchain of the machine:
 | `windows-msvc` | `cl` for the hierarchy and variance programs, and MinGW-w64 `g++` for `run_clustering`, because today's `clustering.py` drives GNU-style compilers only. Run it from a Developer PowerShell with MinGW-w64 `g++` on `PATH`. |
 
 ```text
-python tests/golden.py --toolchain windows-msvc          # compare
-python tests/golden.py --toolchain windows-msvc --record # record anew
+python tests/golden.py --toolchain linux-gcc             # compare
+python tests/golden.py --toolchain linux-gcc --compat    # other versions
+python tests/golden.py --toolchain linux-gcc --record    # record anew
 python tests/golden.py --toolchain linux-gcc --only pipeline22 tree3
 python tests/golden.py --toolchain linux-gcc --skip-slow # no timing set
 ```

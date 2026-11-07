@@ -8,9 +8,13 @@
 - One branch `phase-<n>` and one pull request into `main` per phase;
   one commit per task.
 - Every change keeps `python tests/golden.py --toolchain linux-gcc`
-  passing (byte-identical outputs) unless a decision record or a plan
-  task says the output changes. Re-record golden files only in the
-  commit that makes such a change, and name the reason in its message.
+  passing (byte-identical outputs, run in the minimal environment that
+  `tests/README.md` describes) unless a decision record or a plan task
+  says the output changes. Re-record golden files only in the commit
+  that makes such a change, and name the reason in its message.
+- Versions: the package must work with any version that supports its
+  functionality. `requirements.txt` states minimums only; CI tests the
+  minimal versions and randomly chosen newer ones.
 - Style: Google-style docstrings that state the minimum Python version
   the same way in every module; 79-character code lines; 72-character
   docstrings and comments; American English; Doxygen `/** @brief */`

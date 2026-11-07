@@ -57,6 +57,15 @@ request into `main`; each task is one commit.
   re-records the timing set.
 - Phase 0: every other scenario gives byte-identical results with GCC
   and Clang under both Python 3.10 and 3.14.
+- Phase 0, versions: the oldest releases that work on Python 3.10 are
+  NumPy 1.21.2 and SciPy 1.7.2 (the first with wheels for 3.10), pandas
+  1.5.0 (`to_csv(lineterminator=)`) and Plotly 4.0.0
+  (`plotly.graph_objects`). With them, every quick scenario passes and
+  every artifact matches the results of the newest releases, except
+  `dendrogram.html`, which embeds Plotly's own library. The newest
+  releases (Python 3.14, NumPy 2.5.4, pandas 3.1.1, SciPy 1.18.1, Plotly
+  7.1.0) also pass. A headless browser loads the dendrogram built with
+  Plotly 4.0.0 without errors.
 - Phase 0: on macOS, Apple Clang 17 rejects floating-point
   `std::from_chars` ("call to deleted function"), so today's
   `run_clustering.cpp` (line 290) and `reconstruct_hierarchy.cpp` (line
@@ -86,7 +95,7 @@ request into `main`; each task is one commit.
 
 | Task | Summary | Status |
 | --- | --- | --- |
-| 0.1 | Tag the current code as the baseline. State in requirements.txt the minimal version of each library... | In progress |
+| 0.1 | Tag the current code as the baseline. State in requirements.txt the minimal version of each library... | Done |
 | 0.2 | Golden datasets in tests/data/: the 22-sample synthetic set, five random trees whose paths contain commas,... | Done |
 | 0.3 | Golden outputs: the SHA-256 of every artifact the current code writes, per toolchain (MSVC, MinGW GCC,... | Done |
 | 0.4 | tests/golden.py drives every script non-interactively, feeding its answers on stdin, and compares the hashes. | Done |
