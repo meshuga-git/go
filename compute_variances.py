@@ -25,9 +25,7 @@ Requires Python 3.10 or newer.
 from __future__ import annotations
 
 import argparse
-import csv
 import hashlib
-import io
 import json
 import logging
 import math
@@ -41,7 +39,7 @@ import tempfile
 import unicodedata
 from collections.abc import Iterator
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Iterable, TypedDict, cast
 

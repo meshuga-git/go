@@ -166,7 +166,7 @@ request into `main`; each task is one commit.
 | 2.4 | Switch every script to the core and delete what it replaces: five writers, four duplicate readers, three... | Not started |
 | 2.5 | Make producer a required argument of the manifest writer. | Not started |
 | 2.6 | Replace repeated literals with the constants: clustering_results, the parsed-data suffixes, .provenance,... | Not started |
-| 2.7 | Delete the 10 unused imports and the if True: blocks. | Not started |
+| 2.7 | Delete the 10 unused imports and the if True: blocks. | Done |
 | 2.8 | Unit tests for every shared format and grammar: report round trip, Python–C++ grammar agreement, and the... | Not started |
 | 2.9 | Strengthen the format checks: each lineage must follow real parent–child links in the topology and end at... | Not started |
 | 2.10 | Make writer and readers agree: each format splits on the exact ASCII separator it names and rejects other... | Not started |

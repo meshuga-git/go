@@ -35,7 +35,6 @@ from compute_variances import (
     TREE_TOPOLOGY_FILE,
     invalidate_dependents,
     parse_canonical_int,
-    parse_decimal_float,
     prompt_input,
     provenance_path,
     publication_unchanged,
@@ -757,87 +756,86 @@ def load_algorithm_data(
     observed_node_ids: set[str] = set()
 
     hierarchy_file = read_utf8_lines(Path(file_paths["hierarchy"]))
-    if True:
-        for row_number, line in enumerate(hierarchy_file, start=1):
-            stripped_line = line.strip()
+    for row_number, line in enumerate(hierarchy_file, start=1):
+        stripped_line = line.strip()
 
-            if not stripped_line:
-                raise ValueError(
-                    "Empty hierarchy row detected at physical line "
-                    f"{row_number}."
-                )
+        if not stripped_line:
+            raise ValueError(
+                "Empty hierarchy row detected at physical line "
+                f"{row_number}."
+            )
 
-            row = stripped_line.split()
-            if len(row) < 2:
-                raise ValueError(
-                    f"Hierarchy row {row_number} must contain a sample ID "
-                    "and cluster count."
-                )
+        row = stripped_line.split()
+        if len(row) < 2:
+            raise ValueError(
+                f"Hierarchy row {row_number} must contain a sample ID "
+                "and cluster count."
+            )
 
-            sample = row[0]
-            if sample not in sample_set:
-                raise ValueError(
-                    f"Hierarchy row {row_number} names unknown sample "
-                    f"{sample!r}."
-                )
-            if sample in hierarchies:
-                raise ValueError(
-                    f"Hierarchy row {row_number} duplicates sample {sample!r}."
-                )
+        sample = row[0]
+        if sample not in sample_set:
+            raise ValueError(
+                f"Hierarchy row {row_number} names unknown sample "
+                f"{sample!r}."
+            )
+        if sample in hierarchies:
+            raise ValueError(
+                f"Hierarchy row {row_number} duplicates sample {sample!r}."
+            )
 
-            try:
-                declared_count = parse_canonical_int(
-                    row[1], source=f"sample_lineages.txt:{row_number}:2"
-                )
-            except ValueError as exc:
-                raise ValueError(
-                    f"Hierarchy row {row_number} has a non-integer "
-                    f"cluster count: {row[1]!r}."
-                ) from exc
+        try:
+            declared_count = parse_canonical_int(
+                row[1], source=f"sample_lineages.txt:{row_number}:2"
+            )
+        except ValueError as exc:
+            raise ValueError(
+                f"Hierarchy row {row_number} has a non-integer "
+                f"cluster count: {row[1]!r}."
+            ) from exc
 
-            if declared_count < 1:
-                raise ValueError(
-                    f"Hierarchy row {row_number} must contain at least root "
-                    "node 0."
-                )
-            if declared_count > sample_count:
-                raise ValueError(
-                    f"Hierarchy row {row_number} declares {declared_count} "
-                    f"nodes, exceeding the maximum root-to-leaf path length "
-                    f"of {sample_count} for {sample_count} samples."
-                )
+        if declared_count < 1:
+            raise ValueError(
+                f"Hierarchy row {row_number} must contain at least root "
+                "node 0."
+            )
+        if declared_count > sample_count:
+            raise ValueError(
+                f"Hierarchy row {row_number} declares {declared_count} "
+                f"nodes, exceeding the maximum root-to-leaf path length "
+                f"of {sample_count} for {sample_count} samples."
+            )
 
-            raw_cluster_ids = row[2:]
-            if declared_count != len(raw_cluster_ids):
-                raise ValueError(
-                    f"Hierarchy row {row_number} declares {declared_count} "
-                    f"cluster(s) but contains {len(raw_cluster_ids)}."
-                )
+        raw_cluster_ids = row[2:]
+        if declared_count != len(raw_cluster_ids):
+            raise ValueError(
+                f"Hierarchy row {row_number} declares {declared_count} "
+                f"cluster(s) but contains {len(raw_cluster_ids)}."
+            )
 
-            normalized_cluster_ids = [
-                _parse_tree_node_id(
-                    cluster_id,
-                    source=f"hierarchy row {row_number}",
-                    max_node_id=max_tree_node_id,
-                )
-                for cluster_id in raw_cluster_ids
-            ]
+        normalized_cluster_ids = [
+            _parse_tree_node_id(
+                cluster_id,
+                source=f"hierarchy row {row_number}",
+                max_node_id=max_tree_node_id,
+            )
+            for cluster_id in raw_cluster_ids
+        ]
 
-            if len(normalized_cluster_ids) != len(set(normalized_cluster_ids)):
-                raise ValueError(
-                    f"Hierarchy row {row_number} contains duplicate "
-                    "immutable node IDs."
-                )
+        if len(normalized_cluster_ids) != len(set(normalized_cluster_ids)):
+            raise ValueError(
+                f"Hierarchy row {row_number} contains duplicate "
+                "immutable node IDs."
+            )
 
-            cluster_set = set(normalized_cluster_ids)
-            if "0" not in cluster_set:
-                raise ValueError(
-                    f"Hierarchy row {row_number} for sample {sample!r} does "
-                    "not contain immutable root node 0."
-                )
+        cluster_set = set(normalized_cluster_ids)
+        if "0" not in cluster_set:
+            raise ValueError(
+                f"Hierarchy row {row_number} for sample {sample!r} does "
+                "not contain immutable root node 0."
+            )
 
-            hierarchies[sample] = cluster_set
-            observed_node_ids.update(cluster_set)
+        hierarchies[sample] = cluster_set
+        observed_node_ids.update(cluster_set)
 
     missing_samples = (
         [sample for sample in samples if sample not in hierarchies]

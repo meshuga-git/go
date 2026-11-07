@@ -24,7 +24,6 @@ from compute_variances import (
     TREE_STATES_FILE,
     TREE_TOPOLOGY_FILE,
     invalidate_dependents,
-    TreeSplit,
     TreeTopology,
     prompt_input,
     provenance_path,

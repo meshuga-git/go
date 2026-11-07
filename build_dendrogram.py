@@ -27,7 +27,6 @@ import random
 import re
 import sys
 from collections import Counter
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict
 
@@ -45,7 +44,6 @@ from compute_variances import (
     PARSED_DATA_PROVENANCE_FILE,
     TREE_STATES_FILE,
     TREE_TOPOLOGY_FILE,
-    TreeSplit,
     TreeTopology,
     provenance_path,
     read_tree_states,

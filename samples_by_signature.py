@@ -33,7 +33,6 @@ from compute_variances import (
     provenance_path,
     read_identifiers,
     read_utf8_lines,
-    validate_identifier,
     verify_artifacts,
     write_provenance,
 )
@@ -233,49 +232,48 @@ def load_expression_values(
 
     try:
         values_file = iter_utf8_lines(path)
-        if True:
-            for row_number, line in enumerate(values_file, start=1):
-                actual_genes = row_number
-                tokens = line.split()
-                if len(tokens) != expected_samples:
-                    raise ValueError(
-                        (
-                            f'Column-count mismatch in {path.name} at row '
-                            f'{row_number}: found {len(tokens)} value(s), '
-                            f'expected {expected_samples} from '
-                            f'{MATRIX_SAMPLES_FILE}.'
-                        )
+        for row_number, line in enumerate(values_file, start=1):
+            actual_genes = row_number
+            tokens = line.split()
+            if len(tokens) != expected_samples:
+                raise ValueError(
+                    (
+                        f'Column-count mismatch in {path.name} at row '
+                        f'{row_number}: found {len(tokens)} value(s), '
+                        f'expected {expected_samples} from '
+                        f'{MATRIX_SAMPLES_FILE}.'
                     )
-
-                row_index = row_number - 1
-                retained_row = (
-                    np.empty(expected_samples, dtype=np.float64)
-                    if row_index in required_gene_indices
-                    else None
                 )
 
-                for column_index, token in enumerate(tokens, start=1):
-                    try:
-                        value = float(parse_canonical_int(
-                            token, source=f"{path}:{row_number}:{column_index}"
-                        ))
-                    except ValueError as exc:
-                        raise ValueError(
-                            f"Nonnumeric value in {path.name} at row "
-                            f"{row_number}, column {column_index}: {token!r}."
-                        ) from exc
+            row_index = row_number - 1
+            retained_row = (
+                np.empty(expected_samples, dtype=np.float64)
+                if row_index in required_gene_indices
+                else None
+            )
 
-                    if not math.isfinite(value):
-                        raise ValueError(
-                            f"Non-finite value in {path.name} at row "
-                            f"{row_number}, column {column_index}."
-                        )
+            for column_index, token in enumerate(tokens, start=1):
+                try:
+                    value = float(parse_canonical_int(
+                        token, source=f"{path}:{row_number}:{column_index}"
+                    ))
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Nonnumeric value in {path.name} at row "
+                        f"{row_number}, column {column_index}: {token!r}."
+                    ) from exc
 
-                    if retained_row is not None:
-                        retained_row[column_index - 1] = value
+                if not math.isfinite(value):
+                    raise ValueError(
+                        f"Non-finite value in {path.name} at row "
+                        f"{row_number}, column {column_index}."
+                    )
 
                 if retained_row is not None:
-                    selected_rows[row_index] = retained_row
+                    retained_row[column_index - 1] = value
+
+            if retained_row is not None:
+                selected_rows[row_index] = retained_row
     except UnicodeError as exc:
         raise ValueError(f"{path.name} is not valid UTF-8.") from exc
 
