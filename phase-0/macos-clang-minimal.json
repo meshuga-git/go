@@ -1,12 +1,12 @@
 {
- "key": "macos-clang-py314",
+ "key": "macos-clang-min",
  "environment": {
-  "python": "3.14.10",
-  "platform": "macOS-15.8.2-arm64-arm-64bit-Mach-O",
-  "numpy": "2.5.4",
-  "pandas": "2.3.3",
-  "scipy": "1.18.1",
-  "plotly": "7.1.0",
+  "python": "3.10.11",
+  "platform": "macOS-15.8.2-arm64-arm-64bit",
+  "numpy": "1.21.3",
+  "pandas": "1.5.0",
+  "scipy": "1.7.3",
+  "plotly": "4.0.0",
   "clang++": "Apple clang version 17.0.0 (clang-1700.0.13.5)"
  },
  "scenarios": {
@@ -593,5 +593,6 @@
     "stderr": "N111.csv\nSample 262 parsed to CSV: normal_N112.csv\nSample 263 parsed to CSV: normal_N113.csv\nSample 264 parsed to CSV: normal_N114.csv\nSample 265 parsed to CSV: normal_N115.csv\nSample 266 parsed to CSV: normal_N116.csv\nSample 267 parsed to CSV: normal_N117.csv\nSample 268 parsed to CSV: normal_N118.csv\nSample 269 parsed to CSV: normal_N119.csv\nSample 270 parsed to CSV: normal_N120.csv\nSample 271 parsed to CSV: normal_N121.csv\nSample 272 parsed to CSV: normal_N122.csv\nSample 273 parsed to CSV: normal_N123.csv\nSample 274 parsed to CSV: normal_N124.csv\nSample 275 parsed to CSV: normal_N125.csv\nSample 276 parsed to CSV: normal_N126.csv\nSample 277 parsed to CSV: normal_N127.csv\nSample 278 parsed to CSV: normal_N128.csv\nSample 279 parsed to CSV: normal_N129.csv\nSample 280 parsed to CSV: normal_N130.csv\nSample 281 parsed to CSV: normal_N131.csv\nSample 282 parsed to CSV: normal_N132.csv\nSample 283 parsed to CSV: normal_N133.csv\nSample 284 parsed to CSV: normal_N134.csv\nSample 285 parsed to CSV: normal_N135.csv\nSample 286 parsed to CSV: normal_N136.csv\nSample 287 parsed to CSV: normal_N137.csv\nSample 288 parsed to CSV: normal_N138.csv\nSample 289 parsed to CSV: normal_N139.csv\nSample 290 parsed to CSV: normal_N140.csv\nSample 291 parsed to CSV: normal_N141.csv\nSample 292 parsed to CSV: normal_N142.csv\nSample 293 parsed to CSV: normal_N143.csv\nSample 294 parsed to CSV: normal_N144.csv\nSample 295 parsed to CSV: normal_N145.csv\nSample 296 parsed to CSV: normal_N146.csv\nSample 297 parsed to CSV: normal_N147.csv\nSample 298 parsed to CSV: normal_N148.csv\nSample 299 parsed to CSV: normal_N149.csv\nSample 300 parsed to CSV: normal_N150.csv\nError: [clustering] Error compiling C++ code: run_clustering.cpp:290:31: error: call to deleted function 'from_chars'\n  290 |     const auto [end, error] = std::from_chars(\n      |                               ^~~~~~~~~~~~~~~\n/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/__charconv/from_chars_integral.h:38:19: note: candidate function has been explicitly deleted\n   38 | from_chars_result from_chars(const char*, const char*, bool, int = 10) = delete;\n      |                   ^\n/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/__charconv/from_chars_integral.h:224:1: note: candidate template ignored: requirement 'is_integral<double>::value' was not satisfied [with _Tp = double]\n  224 | from_chars(const char* __first, const char* __last, _Tp& __value) {\n      | ^\n/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/__charconv/from_chars_integral.h:230:1: note: candidate function template not viable: requires 4 arguments, but 3 were provided\n  230 | from_chars(const char* __first, const char* __last, _Tp& __value, int __base) {\n      | ^          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n1 error generated.\n"
    }
   }
- }
+ },
+ "compat": false
 }
