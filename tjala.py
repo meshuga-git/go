@@ -3209,13 +3209,19 @@ def update_pheromones(
     for term_id in active_ids:
         pheromones[term_id] = updated[term_id] / new_sum
 
-    normalized_sum = sum(pheromones[term_id] for term_id in active_ids)
+    # fsum adds the stored values exactly. Each division above rounds by
+    # half an ulp, and new_sum carries the rounding of one addition per
+    # term, so the exact total may miss 1.0 by about n machine epsilons.
+    normalized_sum = math.fsum(
+        pheromones[term_id] for term_id in active_ids
+    )
+    tolerance = max(1e-12, len(active_ids) * sys.float_info.epsilon)
 
     if not math.isclose(
         normalized_sum,
         1.0,
-        rel_tol=1e-12,
-        abs_tol=1e-12,
+        rel_tol=0.0,
+        abs_tol=tolerance,
     ):
         raise RuntimeError(
             "Normalized pheromones do not sum to 1.0: " f"{normalized_sum}."

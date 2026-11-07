@@ -470,7 +470,8 @@
     "build_dendrogram": 0,
     "compute_variances": 0,
     "samples_by_cluster": 0,
-    "tjala": 1
+    "tjala": 0,
+    "samples_by_signature": 0
    },
    "artifacts": {
     "cannot_links.txt": "fa6331bf7275bf76d323aa7b64b3daa8b93aad5d91e694dd3e38a8c7db510c2a",
@@ -786,8 +787,12 @@
     "clustering_results/matrix_values.txt": "699bf2da4cf5a37baeed1f99d1427d5540e85e8defe16f59f624a16f2b2ae9be",
     "clustering_results/prepared.provenance": "b533f5dc780d9468a5d59f2d001a15b7f64650da61fe39fbb48b91b398d5ad92",
     "clustering_results/sample_lineages.txt": "bd5465172df9593d96353e3e2d3a0e22beeb84e34bc7d0a9888a27fef2ce8bb7",
+    "clustering_results/signature_1.txt": "e9fe36dbaa18016f9f39aed06f4e5c44bb40520f2a2039170a295cbabc14f06a",
+    "clustering_results/signature_1.txt.provenance": "2ebb498afc02fb3e9c76e93101975248d789a978dc051ee5a7f2c3b0818b7c77",
     "clustering_results/term_variances.txt": "c7bba1e29512fc190bd88b2c52404fb05c1f614fc964ccb9872cda53ebdb7ae8",
     "clustering_results/term_variances.txt.provenance": "375947645b00220d055737e075917027a436f37276bbc35def61bf55497ef844",
+    "clustering_results/tjala_output.txt": "274f53527204038b6686342efeddf8f5bdf88865935075d9e7fdc94c7fac5d8c",
+    "clustering_results/tjala_output.txt.provenance": "c2e95d014f097f5bad0f78c665b71efa46bb03f066de62e09828a96923fa370b",
     "clustering_results/total_data.csv": "3c1794ed428a8b744971265eb9147f3d2d222feade302d0ebfcf1cc9956d2773",
     "clustering_results/total_data.csv.provenance": "7a8dd4c4c8733ed3ab514861c3eda66b75c0cb2ffb068fbf00db82e72cf75b83",
     "clustering_results/tree_splits.txt": "d473f4d8765b87a2cae9ac15a8568ced62dcab3d1d3b93df4807b2018de83600",

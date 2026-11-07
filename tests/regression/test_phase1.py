@@ -40,3 +40,28 @@ def test_1_6_variance_engine_knows_every_stage_name() -> None:
     cpp = (REPO / "compute_variances.cpp").read_text(encoding="utf-8")
     assert (_stage_names(r"_STAGE_NAMES = \{(.*?)\}", python)
             == _stage_names(r"std::set<std::string> STAGES\{(.*?)\};", cpp))
+
+
+def _load(name: str):
+    """Import one of the package's scripts as a module."""
+    import importlib.util
+    import sys
+
+    if str(REPO) not in sys.path:
+        sys.path.insert(0, str(REPO))
+    spec = importlib.util.spec_from_file_location(name, REPO / f"{name}.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module  # dataclasses look their module up here
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_1_3_a_million_active_terms_pass_the_pheromone_check() -> None:
+    """Task 1.3: the sum check holds for 10^6 terms on Python 3.10."""
+    tjala = _load("tjala")
+    count = 1_000_000
+    pheromones = dict.fromkeys(range(count), 1.0 / count)
+    graph = {"pheromones": pheromones, "active_term_ids": set(pheromones)}
+    best = tjala.Antecedent(term_ids=[0, 1, 2], quality=0.75)
+    tjala.update_pheromones(graph, best)
+    assert abs(sum(pheromones.values()) - 1.0) < 1e-9

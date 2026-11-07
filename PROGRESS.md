@@ -112,7 +112,7 @@ request into `main`; each task is one commit.
 | --- | --- | --- |
 | 1.1 | Remove the deletion that clustering.py runs before its first prompt (lines 1036–1040). Results are... | Done |
 | 1.2 | Compare hashes before replacing an output. An identical result is not rewritten and invalidates nothing... | Not started |
-| 1.3 | Check the pheromone sum with math.fsum against a tolerance that grows with the number of active terms (n·ε). | Not started |
+| 1.3 | Check the pheromone sum with math.fsum against a tolerance that grows with the number of active terms (n·ε). | Done |
 | 1.4 | Remove the symlink refusal from cleanup. | Not started |
 | 1.5 | Add a per-process hash memo keyed on path, size, modification time and file ID. | Not started |
 | 1.6 | Correct the stage name "terms" to "signatures" in compute_variances.cpp. | Done |
