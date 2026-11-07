@@ -61,13 +61,38 @@ def run_script(cwd: Path, script: str, *args: str,
                           timeout=1800)
 
 
-@pytest.fixture
-def workflow(tmp_path: Path) -> Path:
+def build_workflow(parent: Path, name: str = "workflow22",
+                   metric: str = "2") -> Path:
     """Build Part 1 and the variance stage on the 22-sample set.
 
-    Each test gets a fresh build in its own folder: provenance records
-    name absolute paths, so a copied folder would no longer link its
-    outputs to their parents.
+    Args:
+        parent: Folder to build in.
+        name: Name of the scenario folder.
+        metric: Distance-metric answer for clustering.py.
+
+    Returns:
+        The finished scenario folder.
+    """
+    base = golden.build_scenarios()["pipeline22"]
+    scenario = golden.Scenario(
+        name,
+        golden.part1(metric, golden.CANNOT, "None", "None")
+        + golden.part2()[:2],
+        cohorts=base.cohorts,
+    )
+    outcome = golden.Runner(toolchain(), parent, measure=False).run(
+        scenario)
+    assert all(code == 0 for code in outcome["stages"].values()), outcome
+    return parent / name
+
+
+@pytest.fixture
+def workflow(tmp_path: Path) -> Path:
+    """Build a fresh 22-sample workflow for one test.
+
+    Each test gets its own build: provenance records name absolute
+    paths, so a copied folder would no longer link its outputs to their
+    parents.
 
     Args:
         tmp_path: Pytest's per-test temporary folder.
@@ -75,14 +100,4 @@ def workflow(tmp_path: Path) -> Path:
     Returns:
         The finished scenario folder.
     """
-    base = golden.build_scenarios()["pipeline22"]
-    scenario = golden.Scenario(
-        "workflow22",
-        golden.part1("2", golden.CANNOT, "None", "None")
-        + golden.part2()[:2],
-        cohorts=base.cohorts,
-    )
-    outcome = golden.Runner(toolchain(), tmp_path, measure=False).run(
-        scenario)
-    assert all(code == 0 for code in outcome["stages"].values()), outcome
-    return tmp_path / scenario.name
+    return build_workflow(tmp_path)

@@ -122,7 +122,7 @@ request into `main`; each task is one commit.
 | 1.6 | Correct the stage name "terms" to "signatures" in compute_variances.cpp. | Done |
 | 1.8 | Warn with the number of zero-filled genes per cohort, and name the zero-variance samples under Pearson or... | Not started |
 | 1.9 | Strip only the .version suffix from gene IDs, so _PAR_Y IDs stay distinct from their chrX twins. | Done |
-| 1.10 | Cannot-cluster list: accept 017 and +17. With a manifest, check that it was exported from the current... | Not started |
+| 1.10 | Cannot-cluster list: accept 017 and +17. With a manifest, check that it was exported from the current... | Done |
 | 1.11 | Read JSON input with type inference off, so identifiers such as "001" stay text. | Done |
 | 1.12 | Reject a duplicate sample header in any input format before pandas renames it, naming the file and the header. | Done |
 | 1.13 | Build on macOS: replace floating-point std::from_chars, which Apple Clang's library rejects, so that... | Done |

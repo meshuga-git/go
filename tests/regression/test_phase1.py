@@ -7,9 +7,10 @@ installed.
 from __future__ import annotations
 
 import re
+import shutil
 from pathlib import Path
 
-from conftest import golden, run_script
+from conftest import build_workflow, golden, run_script
 
 REPO = golden.REPO
 
@@ -201,3 +202,39 @@ def test_1_9_par_y_genes_stay_distinct(tmp_path: Path) -> None:
     clustering._normalize_expression_columns(table, str(source))
     assert table["gene"].tolist() == [
         "ENSG00000182378", "ENSG00000182378_PAR_Y", "ENSG00000000003"]
+
+
+def _tjala_answers(cannot_file: str) -> str:
+    """Return quick Tjala answers that use ``cannot_file``."""
+    return f"3\n2\n10\n10\n10\n3\n12\n{cannot_file}\n0.05\n"
+
+
+def test_1_10_cannot_cluster_list_checks(workflow: Path) -> None:
+    """Task 1.10: lenient IDs, a tree check and a missing-manifest note.
+
+    017 and +17 name node 17; a list whose manifest names another tree
+    is refused; a list without a manifest is used with a warning that
+    names each cluster and its size.
+    """
+    results = workflow / "clustering_results"
+    (results / "typed.txt").write_text("+1\n", encoding="utf-8")
+    done = run_script(results, "tjala.py", stdin=_tjala_answers("typed.txt"))
+    assert done.returncode == 0, done.stderr[-2000:]
+    assert "typed.txt has no provenance record" in done.stderr
+    assert "cluster(s) 1 (12 samples)" in done.stderr
+    (results / "padded.txt").write_text("01\n", encoding="utf-8")
+    done = run_script(results, "tjala.py",
+                      stdin=_tjala_answers("padded.txt"))
+    assert done.returncode == 0, done.stderr[-2000:]
+
+    done = run_script(results, "samples_by_cluster.py",
+                      stdin="1\n1\nN\nExit\n")
+    assert done.returncode == 0, done.stderr[-2000:]
+    other = build_workflow(workflow.parent / "other", metric="1")
+    other_results = other / "clustering_results"
+    for name in ("cluster_1.txt", "cluster_1.txt.provenance"):
+        shutil.copyfile(results / name, other_results / name)
+    done = run_script(other_results, "tjala.py",
+                      stdin=_tjala_answers("cluster_1.txt"))
+    assert done.returncode != 0
+    assert "exported from a different tree" in done.stderr
