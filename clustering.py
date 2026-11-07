@@ -744,7 +744,8 @@ def _clean_clustering_results(output_dir: Path) -> None:
     invalidate_dependents(owned + [manifest], [output_dir, output_dir.parent])
     manifest.unlink(missing_ok=True)
     for path in owned:
-        if path.is_symlink() or not path.is_file():
+        # unlink removes a symbolic link itself, not its target.
+        if not path.is_symlink() and not path.is_file():
             raise ValueError(f"Refusing nonregular clustering output: {path}")
         path.unlink()
 

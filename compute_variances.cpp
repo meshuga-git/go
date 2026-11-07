@@ -744,10 +744,8 @@ void invalidate_dependents(const std::vector<fs::path>& changed,
             for (const auto& [name, digest] : it->second.outputs) {
                 const auto output = it->first.parent_path() /
                 pipeline_io::path_from_utf8(name);
-                if (fs::is_symlink(output)) {
-                    throw std::runtime_error("Refusing symlink cleanup");
-                }
                 dirty.insert(fs::weakly_canonical(output));
+                // fs::remove deletes a symbolic link, not its target.
                 fs::remove(output);
             }
             it = records.erase(it);

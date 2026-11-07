@@ -726,9 +726,7 @@ def invalidate_dependents(
             changed_paths.add(manifest.resolve())
             for name in record.outputs:
                 output = manifest.parent / name
-                if output.is_symlink():
-                    raise ValueError(
-                        f"Refusing cleanup through symlink: {output}")
+                # unlink removes a symbolic link itself, not its target.
                 output.unlink(missing_ok=True)
                 changed_paths.add(output.resolve())
             removed.append(manifest)

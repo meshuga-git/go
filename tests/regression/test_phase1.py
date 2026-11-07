@@ -65,3 +65,26 @@ def test_1_3_a_million_active_terms_pass_the_pheromone_check() -> None:
     best = tjala.Antecedent(term_ids=[0, 1, 2], quality=0.75)
     tjala.update_pheromones(graph, best)
     assert abs(sum(pheromones.values()) - 1.0) < 1e-9
+
+
+def test_1_4_cleanup_removes_a_symlinked_output(
+        workflow: Path, tmp_path: Path) -> None:
+    """Task 1.4: cleanup removes a link to an output, not the target."""
+    import shutil
+
+    import pytest
+
+    page = workflow / "dendrogram.html"
+    target = tmp_path / "kept.html"
+    shutil.copyfile(page, target)
+    content = target.read_bytes()
+    page.unlink()
+    try:
+        page.symlink_to(target)
+    except OSError:
+        pytest.skip("this system does not allow symbolic links")
+    answers = f"2\n{golden.CANNOT}\nNone\nNone\n"
+    done = run_script(workflow, "clustering.py", stdin=answers)
+    assert done.returncode == 0, done.stderr
+    assert not page.is_symlink() and not page.exists()
+    assert target.read_bytes() == content
