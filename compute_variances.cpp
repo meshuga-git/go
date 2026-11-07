@@ -15,11 +15,13 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cerrno>
 #include <charconv>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -39,6 +41,7 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include <version>
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -284,10 +287,26 @@ double parse_decimal_float(std::string_view token, std::string_view source) {
     }
     if (token.starts_with('+')) token.remove_prefix(1);
     double result{};
+#if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
     const auto [end, error] = std::from_chars(
         token.data(), token.data() + token.size(), result);
-    if (error != std::errc{} || end != token.data() + token.size() ||
-        !std::isfinite(result)) {
+    const bool parsed =
+        error == std::errc{} && end == token.data() + token.size();
+#else
+    // Apple Clang's library has no floating-point from_chars. strtod
+    // reads the same validated decimal syntax in the default "C" locale
+    // and rounds correctly too; like from_chars, it rejects only values
+    // that overflow or underflow to zero, not subnormal ones.
+    const std::string text(token);
+    char* end = nullptr;
+    errno = 0;
+    result = std::strtod(text.c_str(), &end);
+    const bool out_of_range =
+        errno == ERANGE && (result == 0.0 || std::isinf(result));
+    const bool parsed =
+        !out_of_range && end == text.c_str() + text.size();
+#endif
+    if (!parsed || !std::isfinite(result)) {
         throw std::runtime_error(std::string(source) +
             ": nonfinite or unrepresentable expression");
     }

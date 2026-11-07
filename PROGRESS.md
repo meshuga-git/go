@@ -121,7 +121,7 @@ request into `main`; each task is one commit.
 | 1.10 | Cannot-cluster list: accept 017 and +17. With a manifest, check that it was exported from the current... | Not started |
 | 1.11 | Read JSON input with type inference off, so identifiers such as "001" stay text. | Not started |
 | 1.12 | Reject a duplicate sample header in any input format before pandas renames it, naming the file and the header. | Not started |
-| 1.13 | Build on macOS: replace floating-point std::from_chars, which Apple Clang's library rejects, so that... | Not started |
+| 1.13 | Build on macOS: replace floating-point std::from_chars, which Apple Clang's library rejects, so that... | Done |
 
 ### Phase 2: Shared core
 

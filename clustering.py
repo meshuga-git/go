@@ -654,8 +654,10 @@ def compile_cpp_code(cpp_file: str, output_base: str) -> str:
 
     try:
         result = subprocess.run(
+            # -ffp-contract=off: fused multiply-adds, which Apple Clang
+            # uses by default on arm64, would change the results there.
             [os.environ.get("CXX", "g++"), "-std=c++20", cpp_file, "-O2",
-                "-o", output_file],
+                "-ffp-contract=off", "-o", output_file],
             stdout=None,
             stderr=subprocess.PIPE,
             text=True,

@@ -2018,10 +2018,13 @@ def build_native_binary(
                 f"/Fo:{object_path}",
             ]
         else:
+            # -ffp-contract=off: fused multiply-adds, which Apple Clang
+            # uses by default on arm64, would change the results there.
             command = [
                 cxx,
                 "-O2",
                 "-std=c++20",
+                "-ffp-contract=off",
                 "-o",
                 str(temporary_exe),
                 str(source),
