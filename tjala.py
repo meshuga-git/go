@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import sys
 import tempfile
 from dataclasses import dataclass, field
@@ -30,13 +31,18 @@ from compute_variances import (
     SAMPLE_LINEAGES_FILE,
     TERM_VARIANCES_FILE,
     TJALA_OUTPUT_FILE,
+    TREE_STATES_FILE,
+    TREE_TOPOLOGY_FILE,
     invalidate_dependents,
     parse_canonical_int,
     parse_decimal_float,
     prompt_input,
     provenance_path,
+    publication_unchanged,
     read_identifiers,
+    read_provenance,
     read_utf8_lines,
+    sha256_file,
     validate_variance_output,
     verify_artifacts,
     write_provenance,
@@ -542,6 +548,68 @@ def _parse_tree_node_id(
     return str(node_id)
 
 
+_CANNOT_CLUSTER_ID_RE = re.compile(r"\+?[0-9]+\Z", re.ASCII)
+
+
+def _parse_cannot_cluster_id(
+    token: str, *, source: str, max_node_id: int
+) -> str:
+    """Read one node ID from a cannot-cluster list.
+
+    People write these lists by hand, so a plus sign and leading zeros
+    are accepted: 017 and +17 both name node 17.
+
+    Args:
+        token: One whitespace-, comma- or semicolon-separated entry.
+        source: File context for diagnostics.
+        max_node_id: Maximum node ID allowed by this dataset.
+
+    Returns:
+        Canonical node string used by Tjala's report model.
+
+    Raises:
+        ValueError: If the entry is not a node ID of this dataset.
+    """
+    if _CANNOT_CLUSTER_ID_RE.fullmatch(token) is None:
+        raise ValueError(f"{source}: invalid node ID {token!r}")
+    node_id = int(token.lstrip("+"), 10)
+    if not 0 <= node_id <= max_node_id:
+        raise ValueError(
+            f"{source}: node {node_id} is outside 0..{max_node_id}"
+        )
+    return str(node_id)
+
+
+def _check_exported_from_current_tree(
+    constraint: Path, base_path: Path
+) -> None:
+    """Refuse a cannot-cluster list exported from another tree.
+
+    Node IDs are only meaningful within the tree that numbered them;
+    a list copied from another clustering would pass the range check
+    and silently name other clusters.
+
+    Args:
+        constraint: The cannot-cluster list, which has a manifest.
+        base_path: Folder holding the current tree.
+
+    Raises:
+        ValueError: If the manifest's tree files differ from the
+            current ones.
+    """
+    record = read_provenance(provenance_path(constraint))
+    recorded = {Path(path).name: digest
+                for path, digest in record.inputs.items()}
+    for name in (TREE_STATES_FILE, TREE_TOPOLOGY_FILE):
+        current = base_path / name
+        if recorded.get(name) != sha256_file(current):
+            raise ValueError(
+                f"{constraint} was exported from a different tree than "
+                f"the one in {base_path}; export it again with "
+                "samples_by_cluster.py."
+            )
+
+
 def load_algorithm_data(
     base_path: str,
     params: RunParameters,
@@ -889,13 +957,15 @@ def load_algorithm_data(
         raw = "\n".join(read_utf8_lines(
             constraint, allow_blank=True, allow_empty=True
         ))
-        if provenance_path(constraint).is_file():
+        has_manifest = provenance_path(constraint).is_file()
+        if has_manifest:
             verify_artifacts([constraint])
+            _check_exported_from_current_tree(constraint, Path(base_path))
 
         if raw:
             tokens = raw.replace(",", " ").replace(";", " ").split()
             normalized_tokens = [
-                _parse_tree_node_id(
+                _parse_cannot_cluster_id(
                     token,
                     source=f"cannot-clusters file {cannot_clusters_path!r}",
                     max_node_id=max_tree_node_id,
@@ -917,6 +987,16 @@ def load_algorithm_data(
             raise ValueError(
                 "Invalid cannot-cluster IDs not found in immutable hierarchy: "
                 f"{sorted(invalid, key=int)}"
+            )
+        if not has_manifest:
+            named = ", ".join(
+                f"{node} ({sum(node in ids for ids in hierarchies.values())}"
+                " samples)" for node in sorted(cannot_clusters, key=int)
+            )
+            print(
+                f"Warning: {cannot_clusters_path} has no provenance "
+                "record, so it may come from another clustering. It names "
+                f"cluster(s) {named}.", file=sys.stderr,
             )
 
     if params["max_terms"] > gene_count:
@@ -3209,13 +3289,19 @@ def update_pheromones(
     for term_id in active_ids:
         pheromones[term_id] = updated[term_id] / new_sum
 
-    normalized_sum = sum(pheromones[term_id] for term_id in active_ids)
+    # fsum adds the stored values exactly. Each division above rounds by
+    # half an ulp, and new_sum carries the rounding of one addition per
+    # term, so the exact total may miss 1.0 by about n machine epsilons.
+    normalized_sum = math.fsum(
+        pheromones[term_id] for term_id in active_ids
+    )
+    tolerance = max(1e-12, len(active_ids) * sys.float_info.epsilon)
 
     if not math.isclose(
         normalized_sum,
         1.0,
-        rel_tol=1e-12,
-        abs_tol=1e-12,
+        rel_tol=0.0,
+        abs_tol=tolerance,
     ):
         raise RuntimeError(
             "Normalized pheromones do not sum to 1.0: " f"{normalized_sum}."
@@ -4360,15 +4446,6 @@ def generate_output_file(
     output_text = "\n\n".join(sections) + "\n"
 
     destination = Path(output_path)
-    invalidate_dependents(
-        [destination, provenance_path(destination)],
-        [destination.parent, destination.parent.parent],
-    )
-    _write_text_atomically(
-        output_path=output_path,
-        content=output_text,
-    )
-
     source_paths = [
         Path(output_dir) / name for name in (
             MATRIX_GENES_FILE, MATRIX_SAMPLES_FILE, MATRIX_VALUES_FILE,
@@ -4376,14 +4453,29 @@ def generate_output_file(
         )
     ]
     source_paths.extend(extra_inputs)
-    write_provenance(
-        provenance_path(Path(output_path)), stage="signatures",
-        outputs=[Path(output_path)], inputs=source_paths,
-        parents={
+    record = {
+        "stage": "signatures",
+        "inputs": source_paths,
+        "parents": {
             provenance_path(path) for path in source_paths
             if provenance_path(path).is_file()
-        }, producer=Path(__file__),
+        },
+        "producer": Path(__file__),
+    }
+    manifest = provenance_path(destination)
+    # An identical report changes nothing, so it keeps its dependents.
+    if publication_unchanged(manifest, {destination: output_text},
+                             **record):
+        return output_path
+    invalidate_dependents(
+        [destination, manifest],
+        [destination.parent, destination.parent.parent],
     )
+    _write_text_atomically(
+        output_path=output_path,
+        content=output_text,
+    )
+    write_provenance(manifest, outputs=[destination], **record)
     return output_path
 
 

@@ -78,6 +78,20 @@ request into `main`; each task is one commit.
   matrix, variance, Tjala and dendrogram outputs are byte-identical
   across Linux and Windows. MSVC and MinGW differ only in
   `compute_variances_state.json`, which names the compiler family.
+- Phase 1, task 1.2: the Python exports (cluster files and Tjala's
+  report) now skip an identical result. The C++ engines and the
+  variance preparation still rewrite their outputs; Phase 5's commit
+  (task 5.3) applies the same rule to every stage.
+- Phase 1, task 1.13: once the C++ programs built on macOS, Apple
+  Clang's default fused multiply-adds on arm64 changed the last digits
+  of `term_variances.txt`; GNU-style builds now pass
+  `-ffp-contract=off`. Since then macOS (arm64), Windows and Linux
+  (x86-64) give byte-identical results in every scenario except where
+  sample paths appear.
+- Phase 1: provenance records name absolute paths, so a results folder
+  that is copied or moved loses the links between its outputs and their
+  parents; invalidation then misses them. Phase 5's relative paths and
+  `relocate` command address this.
 - Phase 0 baseline (`tests/baselines/linux-gcc-py310.json`): the
   shared SHA-256 helper runs 1,024 times in the 22-sample variance
   stage and 10,754 times on the timing set, up to 28 times for one
@@ -106,18 +120,18 @@ request into `main`; each task is one commit.
 
 | Task | Summary | Status |
 | --- | --- | --- |
-| 1.1 | Remove the deletion that clustering.py runs before its first prompt (lines 1036–1040). Results are... | Not started |
-| 1.2 | Compare hashes before replacing an output. An identical result is not rewritten and invalidates nothing... | Not started |
-| 1.3 | Check the pheromone sum with math.fsum against a tolerance that grows with the number of active terms (n·ε). | Not started |
-| 1.4 | Remove the symlink refusal from cleanup. | Not started |
-| 1.5 | Add a per-process hash memo keyed on path, size, modification time and file ID. | Not started |
-| 1.6 | Correct the stage name "terms" to "signatures" in compute_variances.cpp. | Not started |
-| 1.8 | Warn with the number of zero-filled genes per cohort, and name the zero-variance samples under Pearson or... | Not started |
-| 1.9 | Strip only the .version suffix from gene IDs, so _PAR_Y IDs stay distinct from their chrX twins. | Not started |
-| 1.10 | Cannot-cluster list: accept 017 and +17. With a manifest, check that it was exported from the current... | Not started |
-| 1.11 | Read JSON input with type inference off, so identifiers such as "001" stay text. | Not started |
-| 1.12 | Reject a duplicate sample header in any input format before pandas renames it, naming the file and the header. | Not started |
-| 1.13 | Build on macOS: replace floating-point std::from_chars, which Apple Clang's library rejects, so that... | Not started |
+| 1.1 | Remove the deletion that clustering.py runs before its first prompt (lines 1036–1040). Results are... | Done |
+| 1.2 | Compare hashes before replacing an output. An identical result is not rewritten and invalidates nothing... | Done |
+| 1.3 | Check the pheromone sum with math.fsum against a tolerance that grows with the number of active terms (n·ε). | Done |
+| 1.4 | Remove the symlink refusal from cleanup. | Done |
+| 1.5 | Add a per-process hash memo keyed on path, size, modification time and file ID. | Done |
+| 1.6 | Correct the stage name "terms" to "signatures" in compute_variances.cpp. | Done |
+| 1.8 | Warn with the number of zero-filled genes per cohort, and name the zero-variance samples under Pearson or... | Done |
+| 1.9 | Strip only the .version suffix from gene IDs, so _PAR_Y IDs stay distinct from their chrX twins. | Done |
+| 1.10 | Cannot-cluster list: accept 017 and +17. With a manifest, check that it was exported from the current... | Done |
+| 1.11 | Read JSON input with type inference off, so identifiers such as "001" stay text. | Done |
+| 1.12 | Reject a duplicate sample header in any input format before pandas renames it, naming the file and the header. | Done |
+| 1.13 | Build on macOS: replace floating-point std::from_chars, which Apple Clang's library rejects, so that... | Done |
 
 ### Phase 2: Shared core
 

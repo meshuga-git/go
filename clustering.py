@@ -57,6 +57,8 @@ DISTANCE_METRICS: dict[str, str] = {
 OUTPUT_EXTENSION = ".csv"
 
 _ITERATION_FILE_RE = re.compile(r"^iter([1-9]\d*)\.txt$")
+# A gene ID's trailing .version, before an optional GENCODE _PAR_Y.
+_GENE_VERSION_RE = re.compile(r"\.[0-9]+(?=(?:_PAR_Y)?\Z)")
 
 Reader = Callable[[str], pd.DataFrame]
 
@@ -174,6 +176,28 @@ def prompt_folder_paths(prompt_text: str, expected_count: int) -> list[str]:
 # ======================================================================
 
 
+def _reject_duplicate_headers(filepath: str, headers: list[str]) -> None:
+    """Refuse a table whose header row names a column twice.
+
+    pandas would rename the second occurrence (S1 becomes S1.1), which
+    silently turns one sample into two different ones.
+
+    Args:
+        filepath: Source table, named in the error.
+        headers: Header-row names in file order.
+
+    Raises:
+        ValueError: If a name occurs more than once.
+    """
+    seen: set[str] = set()
+    for name in headers:
+        if name in seen:
+            raise ValueError(
+                f"{filepath}: duplicate sample header {name!r}"
+            )
+        seen.add(name)
+
+
 def _read_por_wrapper(filepath: str) -> pd.DataFrame:
     """Read a POR file and return its DataFrame."""
     import pyreadstat
@@ -197,6 +221,7 @@ def _read_tab_delimited(filepath: str) -> pd.DataFrame:
     rows = [line.split("\t") for line in read_utf8_lines(Path(filepath))]
     if len(rows) < 2 or any(len(row) != len(rows[0]) for row in rows):
         raise ValueError(f"{filepath}: inconsistent TSV records")
+    _reject_duplicate_headers(filepath, rows[0])
     return pd.DataFrame(rows[1:], columns=rows[0])
 
 
@@ -218,6 +243,7 @@ def _read_csv(filepath: str) -> pd.DataFrame:
         raise ValueError(f"{filepath}: expected sample headers and data")
     if any(len(row) != len(rows[0]) for row in rows[1:]):
         raise ValueError(f"{filepath}: inconsistent field count")
+    _reject_duplicate_headers(filepath, rows[0])
     return pd.DataFrame(rows[1:], columns=rows[0])
 
 
@@ -237,6 +263,7 @@ def _read_dat(filepath: str) -> pd.DataFrame:
     rows = [line.split() for line in read_utf8_lines(Path(filepath))]
     if len(rows) < 2 or any(len(row) != len(rows[0]) for row in rows):
         raise ValueError(f"{filepath}: inconsistent DAT records")
+    _reject_duplicate_headers(filepath, rows[0])
     return pd.DataFrame(rows[1:], columns=rows[0])
 
 
@@ -246,12 +273,39 @@ def _read_excel(filepath: str) -> pd.DataFrame:
     Excel is treated like CSV/TSV/DAT input: row 1 is a column-header
     row of sample names, not a data row.
     """
+    header = pd.read_excel(filepath, header=None, nrows=1, dtype=str,
+                           keep_default_na=False)
+    _reject_duplicate_headers(filepath, header.iloc[0].tolist())
     return pd.read_excel(filepath, header=0, dtype=str, keep_default_na=False)
 
 
 def _read_json(filepath: str) -> pd.DataFrame:
-    """Read a JSON file containing records."""
-    return pd.read_json(filepath, orient="records")
+    """Read a JSON array of records, keeping values as written.
+
+    The standard json module parses the file, so no type or date
+    inference applies: identifiers such as "001" remain text, and
+    numbers are read exactly as Python reads them.
+
+    Args:
+        filepath: JSON source holding one object per row.
+
+    Returns:
+        The records as a table, columns in first-seen order.
+
+    Raises:
+        ValueError: If the file is not an array of objects.
+        OSError: If the file cannot be read.
+    """
+    def unique_keys(pairs: list[tuple[str, object]]) -> dict:
+        _reject_duplicate_headers(filepath, [key for key, _ in pairs])
+        return dict(pairs)
+
+    with open(filepath, encoding="utf-8") as stream:
+        records = json.load(stream, object_pairs_hook=unique_keys)
+    if not isinstance(records, list) or not all(
+            isinstance(record, dict) for record in records):
+        raise ValueError(f"{filepath}: expected a JSON array of records")
+    return pd.DataFrame.from_records(records)
 
 
 def _read_stata(filepath: str) -> pd.DataFrame:
@@ -331,7 +385,9 @@ def _load_dataframe(file_path: str, reader: Reader) -> pd.DataFrame:
         RuntimeError: If a dependency is missing or the reader fails.
     """
     try:
-        return reader(file_path)
+        table = reader(file_path)
+        _reject_duplicate_headers(file_path, [str(c) for c in table.columns])
+        return table
     except ImportError as exc:
         raise RuntimeError(
             (
@@ -399,9 +455,10 @@ def _normalize_expression_columns(
     """
     _validate_input_dataframe(dataframe, file_path)
     expression_columns = [str(col) for col in dataframe.columns[1:]]
-    normalized = (
-        [str(value).split(".", 1)[0] for value in dataframe.iloc[:, 0]]
-    )
+    # Only the version goes: ENSG00000182378.14_PAR_Y becomes
+    # ENSG00000182378_PAR_Y and stays distinct from its chrX twin.
+    normalized = [_GENE_VERSION_RE.sub("", str(value), count=1)
+                  for value in dataframe.iloc[:, 0]]
     seen: set[str] = set()
     for number, gene in enumerate(normalized, 2):
         validate_identifier(gene, source=f"{file_path}:{number}:1")
@@ -498,6 +555,7 @@ def _clean_output_files(output_path: Path) -> None:
 def write_sample_csvs(
     all_files: dict[str, list[str]], output_dir: str,
     known_sample_ids: set[str] | None = None,
+    gene_sets: list[frozenset[str]] | None = None,
 ) -> list[str]:
     """Publish normalized per-sample CSVs and their provenance.
 
@@ -509,6 +567,8 @@ def write_sample_csvs(
         all_files: Source paths grouped by deterministic output prefix.
         output_dir: Existing-layout parsed-data destination.
         known_sample_ids: Run-wide sample IDs, updated in place.
+        gene_sets: If given, receives each source table's normalized
+            gene IDs, which all of its samples share.
 
     Returns:
         Absolute generated sample paths in deterministic ingestion
@@ -536,6 +596,8 @@ def write_sample_csvs(
                 raise ValueError(f"Unsupported format: {file_path}")
             dataframe = _load_dataframe(file_path, reader)
             labels = _normalize_expression_columns(dataframe, file_path)
+            if gene_sets is not None:
+                gene_sets.append(frozenset(dataframe["gene"]))
             for expression_column in labels:
                 name = _build_output_name(prefix, file_path, expression_column)
                 if name in seen:
@@ -654,8 +716,10 @@ def compile_cpp_code(cpp_file: str, output_base: str) -> str:
 
     try:
         result = subprocess.run(
+            # -ffp-contract=off: fused multiply-adds, which Apple Clang
+            # uses by default on arm64, would change the results there.
             [os.environ.get("CXX", "g++"), "-std=c++20", cpp_file, "-O2",
-                "-o", output_file],
+                "-ffp-contract=off", "-o", output_file],
             stdout=None,
             stderr=subprocess.PIPE,
             text=True,
@@ -695,13 +759,17 @@ def _write_paths_file(filename: Path, paths: list[str]) -> None:
     )
 
 
-def _process_input_folder(folder: str, known_sample_ids: set[str]) -> None:
+def _process_input_folder(
+    folder: str, known_sample_ids: set[str],
+    gene_sets: list[frozenset[str]] | None = None,
+) -> None:
     """Publish one source group and its sample-file manifest.
 
     Args:
         folder: Constraint-group source folder.
         known_sample_ids: Run-wide IDs used to reject cross-group
             collisions.
+        gene_sets: If given, receives each source table's gene IDs.
 
     Raises:
         ValueError: If data or global sample identity is invalid.
@@ -710,7 +778,8 @@ def _process_input_folder(folder: str, known_sample_ids: set[str]) -> None:
     folder_path = Path(folder).resolve()
     all_files = discover_input_files(str(folder_path))
     parsed_dir = folder_path.with_name(folder_path.name + "_parsed_data")
-    generated = write_sample_csvs(all_files, str(parsed_dir), known_sample_ids)
+    generated = write_sample_csvs(all_files, str(parsed_dir), known_sample_ids,
+                                  gene_sets)
     manifest = folder_path.with_name(folder_path.name + "_parsed_files.txt")
     write_text_atomically(manifest, "\n".join(generated) + "\n")
     write_provenance(
@@ -719,6 +788,35 @@ def _process_input_folder(folder: str, known_sample_ids: set[str]) -> None:
             parsed_dir / PARSED_DATA_PROVENANCE_FILE],
         producer=Path(__file__),
     )
+
+
+def _warn_zero_filled_genes(
+    folder_genes: dict[str, list[frozenset[str]]]
+) -> None:
+    """Report, per source folder, the genes the engine will set to zero.
+
+    A sample lacks every gene that only other tables measure, and the
+    engine counts it as 0 there. A gene measured in one cohort only
+    can then separate the cohorts on its own.
+
+    Args:
+        folder_genes: Gene IDs of each source table, by folder.
+    """
+    tables = [genes for sets in folder_genes.values() for genes in sets]
+    if not tables:
+        return
+    measured = frozenset().union(*tables)
+    for folder, sets in folder_genes.items():
+        if not sets:
+            continue
+        missing = measured - frozenset.intersection(*sets)
+        if missing:
+            print(
+                f"Warning: {len(missing)} gene(s) absent from samples in "
+                f"{folder} are set to 0 there; a gene measured in one "
+                "cohort only can separate the cohorts on its own.",
+                file=sys.stderr,
+            )
 
 
 def _clean_clustering_results(output_dir: Path) -> None:
@@ -744,7 +842,8 @@ def _clean_clustering_results(output_dir: Path) -> None:
     invalidate_dependents(owned + [manifest], [output_dir, output_dir.parent])
     manifest.unlink(missing_ok=True)
     for path in owned:
-        if path.is_symlink() or not path.is_file():
+        # unlink removes a symbolic link itself, not its target.
+        if not path.is_symlink() and not path.is_file():
             raise ValueError(f"Refusing nonregular clustering output: {path}")
         path.unlink()
 
@@ -1033,11 +1132,6 @@ def main() -> int:
             "directory containing the C++ source."
         )
 
-    results = Path("clustering_results")
-    if results.is_dir():
-        invalidate_dependents(
-            [results / CLUSTERING_PROVENANCE_FILE], [results, results.parent]
-        )
     distance_metric = prompt_distance_metric()
 
     # Validate that at least one folder was provided before any
@@ -1054,8 +1148,11 @@ def main() -> int:
         )
 
     known_sample_ids: set[str] = set()
+    folder_genes: dict[str, list[frozenset[str]]] = {}
     for folder in folders_all:
-        _process_input_folder(folder, known_sample_ids)
+        _process_input_folder(folder, known_sample_ids,
+                              folder_genes.setdefault(folder, []))
+    _warn_zero_filled_genes(folder_genes)
 
     exe_path = compile_cpp_code(str(cpp_source), "run_clustering")
 

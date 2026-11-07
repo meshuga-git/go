@@ -15,6 +15,7 @@
 #include <bit>
 #include <cerrno>
 #include <charconv>
+#include <cstdlib>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -43,6 +44,7 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include <version>
 #ifdef _WIN32
 #    ifndef NOMINMAX
 #        define NOMINMAX
@@ -287,10 +289,26 @@ double parse_decimal_float(std::string_view token, std::string_view source) {
     }
     if (token.starts_with('+')) token.remove_prefix(1);
     double result{};
+#if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
     const auto [end, error] = std::from_chars(
         token.data(), token.data() + token.size(), result);
-    if (error != std::errc{} || end != token.data() + token.size() ||
-        !std::isfinite(result)) {
+    const bool parsed =
+        error == std::errc{} && end == token.data() + token.size();
+#else
+    // Apple Clang's library has no floating-point from_chars. strtod
+    // reads the same validated decimal syntax in the default "C" locale
+    // and rounds correctly too; like from_chars, it rejects only values
+    // that overflow or underflow to zero, not subnormal ones.
+    const std::string text(token);
+    char* end = nullptr;
+    errno = 0;
+    result = std::strtod(text.c_str(), &end);
+    const bool out_of_range =
+        errno == ERANGE && (result == 0.0 || std::isinf(result));
+    const bool parsed =
+        !out_of_range && end == text.c_str() + text.size();
+#endif
+    if (!parsed || !std::isfinite(result)) {
         throw std::runtime_error(std::string(source) +
             ": nonfinite or unrepresentable expression");
     }
@@ -747,10 +765,8 @@ void invalidate_dependents(const std::vector<fs::path>& changed,
             for (const auto& [name, digest] : it->second.outputs) {
                 const auto output = it->first.parent_path() /
                 pipeline_io::path_from_utf8(name);
-                if (fs::is_symlink(output)) {
-                    throw std::runtime_error("Refusing symlink cleanup");
-                }
                 dirty.insert(fs::weakly_canonical(output));
+                // fs::remove deletes a symbolic link, not its target.
                 fs::remove(output);
             }
             it = records.erase(it);
@@ -1353,6 +1369,41 @@ private:
         }
     }
     /**
+     * @brief Name the samples whose values do not vary.
+     * @details A correlation needs variance on both sides, so such a
+     *     sample gets distance 2.0 to every other one, even to an
+     *     identical sample. The sums repeat the pairwise loops exactly,
+     *     so the warning names the same samples those loops treat so.
+     * @param metric Metric name for the message.
+     * @param row Returns sample i's values: expressions or ranks.
+     * @param avg Per-sample means of those values.
+     */
+    template <typename Row>
+    void warn_zero_variance(const char* metric, Row row,
+        const std::vector<double>& avg) const {
+        std::vector<std::string> names;
+        for (std::size_t i = 0; i < avg.size(); ++i) {
+            double squares = 0.0;
+            for (const double value : row(i)) {
+                const double deviation = value - avg[i];
+                squares += deviation * deviation;
+            }
+            if (squares <= 0.0) {
+                names.push_back(fs::path(dataset_.sample_paths()[i])
+                    .filename().string());
+            }
+        }
+        if (names.empty()) return;
+        std::string listed;
+        for (const auto& name : names) {
+            listed += (listed.empty() ? "" : ", ") + name;
+        }
+        std::cerr << std::format(
+            "Warning: {} sample(s) do not vary, so their {} distance to "
+            "every sample is 2.0: {}\n", names.size(), metric, listed);
+    }
+
+    /**
      * @brief Fill one-minus-Pearson-correlation distances.
      * @throws std::runtime_error If a computed correlation is
      *     nonfinite.
@@ -1366,6 +1417,8 @@ private:
             avg[i] = std::accumulate(expr.begin(), expr.end(), 0.0)
             / static_cast<double>(genes);
         }
+        warn_zero_variance("Pearson",
+            [&](std::size_t i) { return dataset_.expressions(i); }, avg);
         for (std::size_t i = 0; i < n; ++i) {
             const auto expr_i = dataset_.expressions(i);
             for (std::size_t j = 0; j < i; ++j) {
@@ -1455,6 +1508,10 @@ private:
             avg[i] = std::accumulate(row.begin(), row.end(), 0.0)
             / static_cast<double>(genes);
         }
+        warn_zero_variance("Spearman", [&](std::size_t i) {
+                return std::span<const double>(rank_matrix.data() + i * genes,
+                    genes);
+            }, avg);
         for (std::size_t i = 0; i < n; ++i) {
             const auto rank_i = std::span<const double>(rank_matrix.data() + i
              * genes, genes);
@@ -1934,9 +1991,7 @@ int main(int argc, char* argv[]) {
             fs::remove(commit);
             for (const auto& [name, digest] : previous.outputs) {
                 const auto old = directory / pipeline_io::path_from_utf8(name);
-                if (fs::is_symlink(old)) throw
-                std::runtime_error("Symlink output refused");
-                fs::remove(old);
+                fs::remove(old);  // removes a symbolic link, not its target
             }
         }
         ClusteringEngine engine(std::move(dataset));

@@ -43,7 +43,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Iterable, TypedDict, cast
+from typing import Any, Iterable, TypedDict, cast
 
 import numpy as np
 import pandas as pd
@@ -626,6 +626,55 @@ def verify_artifacts(paths: Iterable[Path]) -> None:
             raise ValueError(f"{owner}: does not own required {path.name}")
 
 
+def render_provenance(
+    path: Path, *, stage: str, outputs: Iterable[Path],
+    inputs: Iterable[Path] = (), parents: Iterable[Path] = (),
+    categories: dict[str, str] | None = None,
+    producer: Path | None = None,
+) -> str:
+    """Return the record that ``write_provenance`` would write.
+
+    Args:
+        path: Stage-local manifest destination.
+        stage: Recognized producing-stage name.
+        outputs: Complete owned output set, all beside the manifest.
+        inputs: Explicit input files; raw external data need no parent.
+        parents: Verified upstream manifests for generated inputs.
+        categories: Optional sample-to-source-folder mapping for
+            plotting.
+        producer: Producing source file; defaults to this module.
+
+    Returns:
+        The record's text.
+
+    Raises:
+        OSError: If hashing fails.
+        ValueError: If stage, ownership, or dependency validation fails.
+    """
+    if stage not in _STAGE_NAMES:
+        raise ValueError(f"Unknown provenance stage: {stage}")
+    path = path.resolve()
+    producer = Path(__file__) if producer is None else producer
+    lines = [PROVENANCE_HEADER, f"stage\t{stage}",
+             f"producer\t{sha256_file(producer)}"]
+    for kind, objects in (("I", inputs), ("P", parents), ("O", outputs)):
+        unique = sorted({Path(obj).resolve() for obj in objects}, key=str)
+        for item in unique:
+            if kind == "P":
+                verify_provenance(item)
+            if kind == "O" and item.parent != path.parent:
+                raise ValueError(f"{item}: output is outside manifest folder")
+            name = item.name if kind == "O" else str(item)
+            lines.append(
+                f"{kind}\t{sha256_file(item)}\t{name.encode('utf-8').hex()}"
+            )
+    for sid, folder in sorted((categories or {}).items()):
+        lines.append(
+            f"C\t{sid.encode('utf-8').hex()}\t{folder.encode('utf-8').hex()}"
+        )
+    return "\n".join(lines) + "\n"
+
+
 def write_provenance(
     path: Path, *, stage: str, outputs: Iterable[Path],
     inputs: Iterable[Path] = (), parents: Iterable[Path] = (),
@@ -652,28 +701,41 @@ def write_provenance(
         OSError: If hashing or publication fails.
         ValueError: If stage, ownership, or dependency validation fails.
     """
-    if stage not in _STAGE_NAMES:
-        raise ValueError(f"Unknown provenance stage: {stage}")
-    path = path.resolve()
-    producer = Path(__file__) if producer is None else producer
-    lines = [PROVENANCE_HEADER, f"stage\t{stage}",
-             f"producer\t{sha256_file(producer)}"]
-    for kind, objects in (("I", inputs), ("P", parents), ("O", outputs)):
-        unique = sorted({Path(obj).resolve() for obj in objects}, key=str)
-        for item in unique:
-            if kind == "P":
-                verify_provenance(item)
-            if kind == "O" and item.parent != path.parent:
-                raise ValueError(f"{item}: output is outside manifest folder")
-            name = item.name if kind == "O" else str(item)
-            lines.append(
-                f"{kind}\t{sha256_file(item)}\t{name.encode('utf-8').hex()}"
-            )
-    for sid, folder in sorted((categories or {}).items()):
-        lines.append(
-            f"C\t{sid.encode('utf-8').hex()}\t{folder.encode('utf-8').hex()}"
-        )
-    write_text_atomically(path, "\n".join(lines) + "\n")
+    record = render_provenance(
+        path, stage=stage, outputs=outputs, inputs=inputs,
+        parents=parents, categories=categories, producer=producer,
+    )
+    write_text_atomically(path.resolve(), record)
+
+
+def publication_unchanged(
+    manifest: Path, contents: dict[Path, str], **record: Any
+) -> bool:
+    """Tell whether publishing ``contents`` would change nothing.
+
+    An identical result must not be rewritten or invalidate anything
+    downstream. That holds when every output already holds exactly the
+    new text and the manifest already holds exactly the record that
+    would be written for it.
+
+    Args:
+        manifest: The outputs' provenance record.
+        contents: New text by output path.
+        **record: The other ``write_provenance`` arguments, without
+            ``outputs``.
+
+    Returns:
+        True when the outputs and their record are already current.
+    """
+    try:
+        for path, text in contents.items():
+            if Path(path).read_bytes() != text.encode("utf-8"):
+                return False
+        current = Path(manifest).read_text(encoding="utf-8")
+        return current == render_provenance(
+            manifest, outputs=list(contents), **record)
+    except (OSError, ValueError):
+        return False
 
 
 def invalidate_dependents(
@@ -726,9 +788,7 @@ def invalidate_dependents(
             changed_paths.add(manifest.resolve())
             for name in record.outputs:
                 output = manifest.parent / name
-                if output.is_symlink():
-                    raise ValueError(
-                        f"Refusing cleanup through symlink: {output}")
+                # unlink removes a symbolic link itself, not its target.
                 output.unlink(missing_ok=True)
                 changed_paths.add(output.resolve())
             removed.append(manifest)
@@ -985,8 +1045,17 @@ def resolve_sample_path(raw_path: str, data_dir: Path) -> Path:
     )
 
 
+# Digests already computed by this process, keyed by resolved path and
+# checked against the file's size, modification time and file ID.
+_DIGEST_MEMO: dict[str, tuple[tuple[int, int, int, int], str]] = {}
+
+
 def sha256_file(path: Path) -> str:
     """Return the hexadecimal SHA-256 digest of a file.
+
+    A file whose size, modification time and file ID are unchanged
+    since this process last hashed it is not read again. Replacing a
+    file, as every atomic write does, gives it a new file ID.
 
     Args:
         path: File to hash.
@@ -994,10 +1063,19 @@ def sha256_file(path: Path) -> str:
     Returns:
         Lowercase hexadecimal SHA-256 digest.
     """
+    path = Path(path)
+    status = path.stat()
+    identity = (status.st_size, status.st_mtime_ns, status.st_ino,
+                status.st_dev)
+    key = str(path.resolve())
+    known = _DIGEST_MEMO.get(key)
+    if known is not None and known[0] == identity:
+        return known[1]
     digest = hashlib.sha256()
     with path.open("rb") as fh:
         for chunk in iter(lambda: fh.read(1024 * 1024), b""):
             digest.update(chunk)
+    _DIGEST_MEMO[key] = (identity, digest.hexdigest())
     return digest.hexdigest()
 
 
@@ -1398,14 +1476,24 @@ def build_matrix(raw_paths: Iterable[str], data_dir: Path) -> pd.DataFrame:
         Dense floating-point expression matrix with sorted genes.
     """
     series_by_sample: dict[str, pd.Series] = {}
+    folders: dict[str, list[str]] = {}
 
     for raw_path in raw_paths:
         sid = sample_id(raw_path)
         resolved = resolve_sample_path(raw_path, data_dir)
         series_by_sample[sid] = _read_sample_expression(resolved, sid)
+        folders.setdefault(str(resolved.parent), []).append(sid)
 
     matrix = pd.DataFrame(series_by_sample)
     matrix = matrix.reindex(sorted(matrix.index))
+    # Zero-fill stays the rule; say how many genes it supplies where.
+    for folder, members in folders.items():
+        filled = int(matrix[members].isna().any(axis=1).sum())
+        if filled:
+            print(
+                f"Warning: {filled} gene(s) absent from samples in "
+                f"{folder} are set to 0 there.", file=sys.stderr,
+            )
     matrix = matrix.fillna(0.0)
     return matrix
 
@@ -2020,10 +2108,13 @@ def build_native_binary(
                 f"/Fo:{object_path}",
             ]
         else:
+            # -ffp-contract=off: fused multiply-adds, which Apple Clang
+            # uses by default on arm64, would change the results there.
             command = [
                 cxx,
                 "-O2",
                 "-std=c++20",
+                "-ffp-contract=off",
                 "-o",
                 str(temporary_exe),
                 str(source),
