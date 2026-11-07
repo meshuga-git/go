@@ -17,6 +17,14 @@ request into `main`; each task is one commit.
 
 ## Agreed in conversation
 
+- Versions: the package runs with any Python, library and compiler
+  version that supports its functionality; the versions installed on
+  any one machine, and its system language, play no part.
+  `requirements.txt` states the minimal versions. CI tests the minimal
+  versions, or the closest newer ones available, and randomly chosen
+  newer versions. The plan's constraints and task 0.1 now say so.
+- Every defect is fixed as soon as possible. The macOS build failure
+  found in Phase 0 is task 1.12 in Phase 1.
 - Python 3.10 is a ceiling: the code uses nothing newer. Each module
   docstring states the minimum version vermin reports for it, raised to
   what the pinned packages need where that is higher. The plan's
@@ -53,8 +61,8 @@ request into `main`; each task is one commit.
   `std::from_chars` ("call to deleted function"), so today's
   `run_clustering.cpp` (line 290) and `reconstruct_hierarchy.cpp` (line
   287) do not compile and the pipeline cannot run there. The macOS
-  golden files record those build failures as today's behavior. No
-  plan task covers this yet.
+  golden files record those build failures as today's behavior; task
+  1.12 fixes them.
 - Phase 0: Windows (MSVC and MinGW-w64 GCC 16) runs every scenario.
   Its results differ from Linux only in files that hold sample paths
   and in the provenance records that hash them; the tree, iteration,
@@ -99,6 +107,7 @@ request into `main`; each task is one commit.
 | 1.9 | Strip only the .version suffix from gene IDs, so _PAR_Y IDs stay distinct from their chrX twins. | Not started |
 | 1.10 | Cannot-cluster list: accept 017 and +17. With a manifest, check that it was exported from the current... | Not started |
 | 1.11 | Read JSON input with type inference off, so identifiers such as "001" stay text. | Not started |
+| 1.12 | Build on macOS: replace floating-point std::from_chars, which Apple Clang's library rejects, so that... | Not started |
 | 1.12 | Reject a duplicate sample header in any input format before pandas renames it, naming the file and the header. | Not started |
 
 ### Phase 2: Shared core
