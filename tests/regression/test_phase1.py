@@ -109,3 +109,30 @@ def test_1_2_identical_reexport_keeps_downstream_outputs(
                       stdin="1\n1\nN\nExit\n")
     assert done.returncode == 0, done.stderr[-2000:]
     assert golden.snapshot(workflow) == before
+
+
+def test_1_5_unchanged_files_are_hashed_once(
+        tmp_path: Path, monkeypatch) -> None:
+    """Task 1.5: the hash memo reads an unchanged file only once."""
+    import hashlib
+    import os
+
+    shared = _load("compute_variances")
+    real = hashlib.sha256
+    calls = []
+
+    def counting(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(shared.hashlib, "sha256", counting)
+    path = tmp_path / "data.txt"
+    path.write_text("one\n", encoding="utf-8")
+    first = shared.sha256_file(path)
+    assert shared.sha256_file(path) == first
+    assert len(calls) == 1
+    replacement = tmp_path / "replacement.txt"
+    replacement.write_text("two\n", encoding="utf-8")
+    os.replace(replacement, path)
+    assert shared.sha256_file(path) != first
+    assert len(calls) == 2

@@ -118,7 +118,7 @@ request into `main`; each task is one commit.
 | 1.2 | Compare hashes before replacing an output. An identical result is not rewritten and invalidates nothing... | Done |
 | 1.3 | Check the pheromone sum with math.fsum against a tolerance that grows with the number of active terms (n·ε). | Done |
 | 1.4 | Remove the symlink refusal from cleanup. | Done |
-| 1.5 | Add a per-process hash memo keyed on path, size, modification time and file ID. | Not started |
+| 1.5 | Add a per-process hash memo keyed on path, size, modification time and file ID. | Done |
 | 1.6 | Correct the stage name "terms" to "signatures" in compute_variances.cpp. | Done |
 | 1.8 | Warn with the number of zero-filled genes per cohort, and name the zero-variance samples under Pearson or... | Not started |
 | 1.9 | Strip only the .version suffix from gene IDs, so _PAR_Y IDs stay distinct from their chrX twins. | Not started |

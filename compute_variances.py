@@ -1045,8 +1045,17 @@ def resolve_sample_path(raw_path: str, data_dir: Path) -> Path:
     )
 
 
+# Digests already computed by this process, keyed by resolved path and
+# checked against the file's size, modification time and file ID.
+_DIGEST_MEMO: dict[str, tuple[tuple[int, int, int, int], str]] = {}
+
+
 def sha256_file(path: Path) -> str:
     """Return the hexadecimal SHA-256 digest of a file.
+
+    A file whose size, modification time and file ID are unchanged
+    since this process last hashed it is not read again. Replacing a
+    file, as every atomic write does, gives it a new file ID.
 
     Args:
         path: File to hash.
@@ -1054,10 +1063,19 @@ def sha256_file(path: Path) -> str:
     Returns:
         Lowercase hexadecimal SHA-256 digest.
     """
+    path = Path(path)
+    status = path.stat()
+    identity = (status.st_size, status.st_mtime_ns, status.st_ino,
+                status.st_dev)
+    key = str(path.resolve())
+    known = _DIGEST_MEMO.get(key)
+    if known is not None and known[0] == identity:
+        return known[1]
     digest = hashlib.sha256()
     with path.open("rb") as fh:
         for chunk in iter(lambda: fh.read(1024 * 1024), b""):
             digest.update(chunk)
+    _DIGEST_MEMO[key] = (identity, digest.hexdigest())
     return digest.hexdigest()
 
 
