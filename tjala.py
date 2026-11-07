@@ -15,7 +15,6 @@ import math
 import os
 import re
 import sys
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TypedDict, cast
@@ -23,7 +22,24 @@ from typing import Any, TypedDict, cast
 import numpy as np
 import pandas as pd
 
-from compute_variances import (
+from compute_variances import validate_variance_output
+from pipeline_formats import (
+    RUN_STOP_LABELS,
+    SCALE_FACTORS,
+    ClusterCoverage,
+    RunSummary,
+    ScaledTerm,
+    Signature,
+    SignatureReport,
+    SignatureTerm,
+    read_cluster_list,
+    read_matrix_values,
+    read_sample_lineages,
+    render_antecedent,
+    render_signature_report,
+    tree_node_count,
+)
+from pipeline_io import (
     BINARY_VECTORS_FILE,
     MATRIX_GENES_FILE,
     MATRIX_SAMPLES_FILE,
@@ -34,7 +50,6 @@ from compute_variances import (
     TREE_STATES_FILE,
     TREE_TOPOLOGY_FILE,
     invalidate_dependents,
-    parse_canonical_int,
     prompt_input,
     provenance_path,
     publication_unchanged,
@@ -42,9 +57,9 @@ from compute_variances import (
     read_provenance,
     read_utf8_lines,
     sha256_file,
-    validate_variance_output,
     verify_artifacts,
     write_provenance,
+    write_text_atomically,
 )
 
 try:
@@ -485,98 +500,9 @@ def prompt_parameters() -> RunParameters:
 # ======================================================================
 # Block 3: Load, Normalize, and Validate Data
 # ======================================================================
-def _tree_node_count(sample_count: int) -> int:
-    """Return the node count for a full immutable binary hierarchy.
-
-    A full binary hierarchy with ``N`` leaves contains exactly ``2N -
-    1`` immutable nodes. Node 0 is the root, and split ``k`` creates
-    sibling nodes ``2k - 1`` and ``2k``. The upstream native variance
-    reader stores node IDs as signed 32-bit integers, so the same
-    representability contract is enforced here.
-
-    Args:
-        sample_count: Number of samples/leaves in the hierarchy.
-
-    Returns:
-        Total immutable tree-node count.
-
-    Raises:
-        ValueError: If the sample count is empty or the largest node ID
-            would exceed the signed 32-bit hierarchy-ID contract.
-    """
-    if sample_count < 1:
-        raise ValueError((
-            'At least one sample is required for an immutable '
-            'tree.'
-        ))
-
-    max_node_id = 2 * sample_count - 2
-    if max_node_id > int(np.iinfo(np.int32).max):
-        raise ValueError(
-            "Dataset is too large for the immutable hierarchy-ID contract: "
-            f"largest node ID would be {max_node_id}, exceeding signed int32."
-        )
-
-    return 2 * sample_count - 1
-
-
-def _parse_tree_node_id(
-    token: str, *, source: str, max_node_id: int
-) -> str:
-    """Validate canonical decimal spelling of an node ID.
-
-    Validate the canonical decimal spelling of an immutable node ID.
-
-    Args:
-        token: Literal machine-field text without quote removal.
-        source: File and field context.
-        max_node_id: Maximum node ID allowed by this dataset.
-
-    Returns:
-        Canonical node string used by Tjala's report model.
-
-    Raises:
-        ValueError: If syntax, sign, or dataset range is invalid.
-    """
-    node_id = parse_canonical_int(token, source=source)
-    if not 0 <= node_id <= max_node_id:
-        raise ValueError((
-            f'{source}: node {node_id} is outside '
-            f'0..{max_node_id}'
-        ))
-    return str(node_id)
 
 
 _CANNOT_CLUSTER_ID_RE = re.compile(r"\+?[0-9]+\Z", re.ASCII)
-
-
-def _parse_cannot_cluster_id(
-    token: str, *, source: str, max_node_id: int
-) -> str:
-    """Read one node ID from a cannot-cluster list.
-
-    People write these lists by hand, so a plus sign and leading zeros
-    are accepted: 017 and +17 both name node 17.
-
-    Args:
-        token: One whitespace-, comma- or semicolon-separated entry.
-        source: File context for diagnostics.
-        max_node_id: Maximum node ID allowed by this dataset.
-
-    Returns:
-        Canonical node string used by Tjala's report model.
-
-    Raises:
-        ValueError: If the entry is not a node ID of this dataset.
-    """
-    if _CANNOT_CLUSTER_ID_RE.fullmatch(token) is None:
-        raise ValueError(f"{source}: invalid node ID {token!r}")
-    node_id = int(token.lstrip("+"), 10)
-    if not 0 <= node_id <= max_node_id:
-        raise ValueError(
-            f"{source}: node {node_id} is outside 0..{max_node_id}"
-        )
-    return str(node_id)
 
 
 def _check_exported_from_current_tree(
@@ -680,55 +606,13 @@ def load_algorithm_data(
 
     gene_count = len(genes)
     sample_count = len(samples)
-    node_count = _tree_node_count(sample_count)
+    node_count = tree_node_count(sample_count)
     max_tree_node_id = node_count - 1
 
-    expression_rows: list[list[int]] = []
-    for number, line in (
-        enumerate(read_utf8_lines(Path(file_paths["values"])), 1)
-    ):
-        tokens = line.split()
-        if len(tokens) != sample_count:
-            raise ValueError(f"matrix_values.txt:{number}: wrong sample count")
-        expression_rows.append([
-            parse_canonical_int(token,
-                source=f"matrix_values.txt:{number}:{column}")
-            for column, token in enumerate(tokens, 1)
-        ])
-    expression_values_df = pd.DataFrame(expression_rows)
-
-    expression_values_df = expression_values_df.apply(
-        pd.to_numeric, errors="coerce"
-    )
-
-    if expression_values_df.isna().any().any():
-        invalid_positions = np.argwhere(expression_values_df.isna().to_numpy())
-        first_row, first_column = invalid_positions[0]
-
-        raise ValueError(
-            "Non-numeric expression value detected in matrix_values.txt "
-            f"at row {first_row + 1}, column {first_column + 1}."
-        )
-
-    values_arr_float = expression_values_df.to_numpy(dtype=np.float64)
-
-    if not np.isfinite(values_arr_float).all():
-        raise ValueError(
-            "Non-finite expression values detected in matrix_values.txt."
-        )
-
-    if not np.equal(values_arr_float, np.floor(values_arr_float)).all():
-        raise ValueError("Expression values must be integers.")
-
-    int32_info = np.iinfo(np.int32)
-    values_min = float(values_arr_float.min())
-    values_max = float(values_arr_float.max())
-    expression_dtype = (
-        np.int32
-        if values_min >= int32_info.min and values_max <= int32_info.max
-        else np.int64
-    )
-    expression_values_df = expression_values_df.astype(expression_dtype)
+    # The shared reader holds every value to the int32 range.
+    expression_values = read_matrix_values(
+        Path(file_paths["values"]), gene_count, sample_count
+    ).astype(np.int32)
 
     validate_variance_output(Path(file_paths["variances"]), Path(base_path))
     variance_rows = [
@@ -736,128 +620,12 @@ def load_algorithm_data(
     ]
     variances = pd.DataFrame(variance_rows)
 
-    if expression_values_df.shape[0] != gene_count:
-        raise ValueError(
-            f"Mismatch: {gene_count} genes vs "
-            f"{expression_values_df.shape[0]} value rows."
-        )
-
-    if expression_values_df.shape[1] != sample_count:
-        raise ValueError(
-            f"Mismatch: {sample_count} samples vs "
-            f"{expression_values_df.shape[1]} value columns."
-        )
-
-    expression_values_df.index = genes
-    expression_values_df.columns = samples
-
-    sample_set = set(samples)
-    hierarchies: dict[str, set[str]] = {}
-    observed_node_ids: set[str] = set()
-
-    hierarchy_file = read_utf8_lines(Path(file_paths["hierarchy"]))
-    for row_number, line in enumerate(hierarchy_file, start=1):
-        stripped_line = line.strip()
-
-        if not stripped_line:
-            raise ValueError(
-                "Empty hierarchy row detected at physical line "
-                f"{row_number}."
-            )
-
-        row = stripped_line.split()
-        if len(row) < 2:
-            raise ValueError(
-                f"Hierarchy row {row_number} must contain a sample ID "
-                "and cluster count."
-            )
-
-        sample = row[0]
-        if sample not in sample_set:
-            raise ValueError(
-                f"Hierarchy row {row_number} names unknown sample "
-                f"{sample!r}."
-            )
-        if sample in hierarchies:
-            raise ValueError(
-                f"Hierarchy row {row_number} duplicates sample {sample!r}."
-            )
-
-        try:
-            declared_count = parse_canonical_int(
-                row[1], source=f"sample_lineages.txt:{row_number}:2"
-            )
-        except ValueError as exc:
-            raise ValueError(
-                f"Hierarchy row {row_number} has a non-integer "
-                f"cluster count: {row[1]!r}."
-            ) from exc
-
-        if declared_count < 1:
-            raise ValueError(
-                f"Hierarchy row {row_number} must contain at least root "
-                "node 0."
-            )
-        if declared_count > sample_count:
-            raise ValueError(
-                f"Hierarchy row {row_number} declares {declared_count} "
-                f"nodes, exceeding the maximum root-to-leaf path length "
-                f"of {sample_count} for {sample_count} samples."
-            )
-
-        raw_cluster_ids = row[2:]
-        if declared_count != len(raw_cluster_ids):
-            raise ValueError(
-                f"Hierarchy row {row_number} declares {declared_count} "
-                f"cluster(s) but contains {len(raw_cluster_ids)}."
-            )
-
-        normalized_cluster_ids = [
-            _parse_tree_node_id(
-                cluster_id,
-                source=f"hierarchy row {row_number}",
-                max_node_id=max_tree_node_id,
-            )
-            for cluster_id in raw_cluster_ids
-        ]
-
-        if len(normalized_cluster_ids) != len(set(normalized_cluster_ids)):
-            raise ValueError(
-                f"Hierarchy row {row_number} contains duplicate "
-                "immutable node IDs."
-            )
-
-        cluster_set = set(normalized_cluster_ids)
-        if "0" not in cluster_set:
-            raise ValueError(
-                f"Hierarchy row {row_number} for sample {sample!r} does "
-                "not contain immutable root node 0."
-            )
-
-        hierarchies[sample] = cluster_set
-        observed_node_ids.update(cluster_set)
-
-    missing_samples = (
-        [sample for sample in samples if sample not in hierarchies]
-    )
-    if missing_samples:
-        raise ValueError(
-            "Hierarchy is missing row(s) for sample(s): "
-            f"{missing_samples}."
-        )
-
-    expected_node_ids = {str(node_id) for node_id in range(node_count)}
-    missing_node_ids = expected_node_ids - observed_node_ids
-    if missing_node_ids:
-        missing_numeric = sorted(int(node_id) for node_id in missing_node_ids)
-        preview = missing_numeric[:20]
-        suffix = "..." if len(missing_numeric) > len(preview) else ""
-        raise ValueError(
-            "sample_lineages.txt does not represent a complete "
-            "fully immutable "
-            f"tree: expected every node ID 0..{max_tree_node_id}, but missing "
-            f"{preview}{suffix}."
-        )
+    lineages = read_sample_lineages(Path(file_paths["hierarchy"]), samples)
+    hierarchies: dict[str, set[str]] = {
+        sample: {str(node_id) for node_id in nodes}
+        for sample, nodes in lineages.items()
+    }
+    observed_node_ids = {str(node_id) for node_id in range(node_count)}
 
     if variances.shape[1] < 4:
         raise ValueError(
@@ -952,32 +720,12 @@ def load_algorithm_data(
             )
 
         constraint = Path(cannot_clusters_path)
-        raw = "\n".join(read_utf8_lines(
-            constraint, allow_blank=True, allow_empty=True
-        ))
         has_manifest = provenance_path(constraint).is_file()
         if has_manifest:
             verify_artifacts([constraint])
             _check_exported_from_current_tree(constraint, Path(base_path))
-
-        if raw:
-            tokens = raw.replace(",", " ").replace(";", " ").split()
-            normalized_tokens = [
-                _parse_cannot_cluster_id(
-                    token,
-                    source=f"cannot-clusters file {cannot_clusters_path!r}",
-                    max_node_id=max_tree_node_id,
-                )
-                for token in tokens
-            ]
-            if len(normalized_tokens) != len(set(normalized_tokens)):
-                raise ValueError(
-                    (
-                        'Cannot-clusters file contains duplicate '
-                        'immutable node IDs.'
-                    )
-                )
-            cannot_clusters = set(normalized_tokens)
+        listed = read_cluster_list(constraint, max_node_id=max_tree_node_id)
+        cannot_clusters = {str(node_id) for node_id in listed} or None
 
     if cannot_clusters:
         invalid = cannot_clusters - observed_node_ids
@@ -1013,8 +761,6 @@ def load_algorithm_data(
         raise ValueError(
             "Max uncovered samples threshold exceeds dataset size."
         )
-
-    expression_values = expression_values_df.to_numpy(copy=False)
 
     data: AlgorithmData = {
         "genes": genes,
@@ -1477,7 +1223,7 @@ def compose_binary_vectors(data: AlgorithmData) -> None:
     if len(set(samples)) != len(samples):
         raise ValueError("Duplicate sample IDs detected.")
 
-    expected_node_count = _tree_node_count(sample_count)
+    expected_node_count = tree_node_count(sample_count)
     if node_count != expected_node_count:
         raise ValueError(
             f"Inconsistent immutable node count: node_count={node_count}, "
@@ -3481,48 +3227,34 @@ class SignatureRecord:
         signature_id: One-based signature number.
         termination_reason: Signature-level stopping reason.
         antecedent: Immutable snapshot of the selected antecedent.
-        antecedent_text: Rendered IF section.
-        consequent_text: Rendered cluster-coverage section.
-        scaling_text: Optional scaling diagnostics.
+        entry: The signature as the report presents it.
     """
 
     signature_id: int
     termination_reason: str
     antecedent: FinalizedAntecedent
-    antecedent_text: str
-    consequent_text: str
-    scaling_text: str
+    entry: Signature
 
 
-def _format_term_for_signature(term: TermRecord) -> str:
-    """Format one term as text for a signature antecedent."""
-    return f"{term['gene']} {term['operator']} {term['value']}"
-
-
-def _format_antecedent_text(
+def _signature_terms(
     graph: GraphState,
     antecedent: Antecedent,
-) -> str:
-    """Render the IF clause of a finalized signature.
+) -> tuple[SignatureTerm, ...]:
+    """Return the conditions of a finalized signature.
 
     Args:
         graph: Graph containing the term-ID lookup.
         antecedent: Finalized term selection in signature order.
 
     Returns:
-        The exact ``IF ... THEN:`` line consumed by sample extraction.
+        One condition per term, in signature order.
     """
     term_by_id = graph["term_by_id"]
-    term_texts = [
-        _format_term_for_signature(term_by_id[term_id])
-        for term_id in antecedent.term_ids
-    ]
-
-    if not term_texts:
-        return "IF <empty> THEN:"
-
-    if_text = " AND ".join(term_texts)
-    return f"IF {if_text} THEN:"
+    return tuple(
+        SignatureTerm(str(term["gene"]), str(term["operator"]),
+                      term["value"])
+        for term in (term_by_id[term_id] for term_id in antecedent.term_ids)
+    )
 
 
 def _compute_cluster_coverages(
@@ -3577,50 +3309,34 @@ def _compute_cluster_coverages(
     return rows
 
 
-def _format_consequent_text(
+def _cluster_sections(
     data: PreparedAlgorithmData,
     antecedent: Antecedent,
-) -> str:
-    """Build the rendered THEN section of a signature.
+) -> tuple[tuple[ClusterCoverage, ...], tuple[ClusterCoverage, ...]]:
+    """Return a signature's coverage of can and cannot clusters.
 
     Args:
         data: Fully prepared algorithm state.
         antecedent: Final candidate antecedent.
 
     Returns:
-        Human-readable can-cluster and cannot-cluster coverage text.
+        The covered clusters that are not cannot clusters, then the
+        covered cannot clusters, each by descending share.
     """
     rows = _compute_cluster_coverages(data, antecedent)
-    cannot_cluster_coverages = [row[:2] for row in rows if row[2]]
-    can_cluster_coverages = [row[:2] for row in rows if not row[2]]
-
-    lines: list[str] = []
-    lines.append("Can clusters:")
-    if can_cluster_coverages:
-        for cluster_id, share in can_cluster_coverages:
-            lines.append(f"{cluster_id}: {share * 100:.1f}% covered")
-    else:
-        lines.append("None")
-
-    lines.append("Cannot clusters:")
-    if cannot_cluster_coverages:
-        for cluster_id, share in cannot_cluster_coverages:
-            lines.append(f"{cluster_id}: {share * 100:.1f}% covered")
-    else:
-        lines.append("None")
-
-    return "\n".join(lines)
+    can = tuple(ClusterCoverage(cluster_id, share * 100)
+                for cluster_id, share, cannot in rows if not cannot)
+    cannot = tuple(ClusterCoverage(cluster_id, share * 100)
+                   for cluster_id, share, cannot in rows if cannot)
+    return can, cannot
 
 
-def _format_scaling_text(
+def _scaled_terms(
     data: PreparedAlgorithmData,
     graph: GraphState,
     antecedent: Antecedent,
-    scale_values: tuple[int, ...] = tuple(range(10, 101, 10)),
-) -> str:
-    """Build scaling diagnostics section for finalized signature.
-
-    Build the scaling diagnostics section for the finalized signature.
+) -> tuple[ScaledTerm, ...]:
+    """Return the scaling diagnostics of a finalized signature.
 
     Scaling preserves the original logical operator. For upregulated
     terms using ">", the threshold is divided by the scale factor. For
@@ -3631,11 +3347,10 @@ def _format_scaling_text(
         data: Main algorithm payload.
         graph: Current antecedent construction graph.
         antecedent: Finalized antecedent.
-        scale_values: Scale factors to apply to each term value.
 
     Returns:
-        A human-readable scaling diagnostics section, or an empty string
-        when cannot clusters are not defined.
+        For each term, one entry per factor in ``SCALE_FACTORS``; empty
+        when the run has no cannot-cluster samples.
     """
     expression_values = data["expression_values"]
     term_by_id = graph["term_by_id"]
@@ -3643,25 +3358,20 @@ def _format_scaling_text(
     cannot_clusters = data.get("cannot_clusters")
 
     if cannot_mask is None or not cannot_clusters:
-        return ""
+        return ()
 
     cannot_total = int(np.sum(cannot_mask))
     if cannot_total == 0:
-        return ""
+        return ()
 
-    lines: list[str] = ["----------"]
-
+    scaled: list[ScaledTerm] = []
     for term_id in antecedent.term_ids:
         term = term_by_id[term_id]
         gene_index = int(term["gene_index"])
         op = str(term["operator"])
         base_value = float(term["value"])
-        gene_name = str(term["gene"])
 
-        if op not in {">", "<"}:
-            continue
-
-        for scale in scale_values:
+        for scale in SCALE_FACTORS:
             if op == ">":
                 scaled_value = base_value / float(scale)
                 covered = expression_values[gene_index, :] > scaled_value
@@ -3671,17 +3381,9 @@ def _format_scaling_text(
 
             covered_in_cannot = int(np.sum(covered & cannot_mask))
             share = covered_in_cannot / cannot_total
-
-            lines.append(
-                f"Scale = {scale}, {gene_name} {op} {scaled_value}: "
-                f"{share * 100:.1f}% covered in cannot clusters"
-            )
-
-    if len(lines) == 1:
-        return ""
-
-    lines.append("----------")
-    return "\n".join(lines)
+            scaled.append(ScaledTerm(scale, str(term["gene"]), op,
+                                     scaled_value, share * 100))
+    return tuple(scaled)
 
 
 def complete_signature(
@@ -3783,18 +3485,14 @@ def complete_signature(
     if epoch_best.home_cluster_index < 0 or not epoch_best.home_cluster_id:
         raise ValueError("Signature has no valid home-cluster assignment.")
 
-    antecedent_text = _format_antecedent_text(
-        graph=graph,
-        antecedent=epoch_best,
-    )
-    consequent_text = _format_consequent_text(
-        data=data,
-        antecedent=epoch_best,
-    )
-    scaling_text = _format_scaling_text(
-        data=data,
-        graph=graph,
-        antecedent=epoch_best,
+    can_clusters, cannot_clusters = _cluster_sections(data, epoch_best)
+    entry = Signature(
+        number=signature_id,
+        stop_reason=termination_reason,
+        terms=_signature_terms(graph, epoch_best),
+        can_clusters=can_clusters,
+        cannot_clusters=cannot_clusters,
+        scaling=_scaled_terms(data, graph, epoch_best),
     )
 
     finalized_covered_indices = epoch_best.covered_indices.copy()
@@ -3821,9 +3519,7 @@ def complete_signature(
         signature_id=signature_id,
         termination_reason=termination_reason,
         antecedent=finalized_antecedent,
-        antecedent_text=antecedent_text,
-        consequent_text=consequent_text,
-        scaling_text=scaling_text,
+        entry=entry,
     )
 
 
@@ -3992,23 +3688,19 @@ class RunCompletionResult:
     total_generated_antecedents: int
     final_uncovered_count: int
 
-    def summary(self) -> str:
-        """Build a human-readable completion summary.
+    def report_summary(self) -> RunSummary:
+        """Return the run summary that closes the report.
 
         Returns:
-            A formatted string summarizing the full Tjala run.
+            The stop reason and the run's counts.
         """
-        return (
-            "Run summary\n"
-            "Termination: "
-            f"{_format_run_termination_reason(self.termination_reason)} "
-            f"({self.termination_reason})\n"
-            f"Signatures generated: {len(self.signatures)}\n"
-            f"Epochs completed: {self.epochs_completed}\n"
-            f"Inner-loop iterations: {self.total_iterations}\n"
-            f"Generated antecedents: {self.total_generated_antecedents}\n"
-            f"Final uncovered samples: {self.final_uncovered_count}\n"
-            f"Remaining active terms: {self.graph.get('term_count', 0)}"
+        return RunSummary(
+            stop_reason=self.termination_reason,
+            epochs=self.epochs_completed,
+            iterations=self.total_iterations,
+            antecedents=self.total_generated_antecedents,
+            uncovered=self.final_uncovered_count,
+            active_terms=int(self.graph.get("term_count", 0)),
         )
 
 
@@ -4213,7 +3905,7 @@ def iterate_until_completion(
             (
                 f'  Signature #{signature_id} finalized '
                 f'({epoch_outcome} after {iteration_count} '
-                f'iterations): {signature.antecedent_text}'
+                f'iterations): {render_antecedent(signature.entry.terms)}'
             ), file=sys.stderr)
         print(
             (
@@ -4272,134 +3964,6 @@ def iterate_until_completion(
 # ======================================================================
 # Block 24: Generate Final Output File
 # ======================================================================
-def _format_signature_termination_reason(reason: str) -> str:
-    """Format a signature-search termination reason.
-
-    Args:
-        reason: Internal termination reason, usually "convergence" or
-            "max_iterations".
-
-    Returns:
-        A human-readable termination label.
-    """
-    labels = {
-        "convergence": "convergence",
-        "max_iterations": "max iterations",
-    }
-    return labels.get(str(reason), str(reason).replace("_", " "))
-
-
-def _format_run_termination_reason(reason: str) -> str:
-    """Describe the whole-run termination reason.
-
-    Known termination codes are mapped to concise explanatory labels.
-    Unknown codes are converted by replacing underscores with spaces.
-
-    Args:
-        reason: Machine-readable termination reason.
-
-    Returns:
-        A human-readable description of the termination reason.
-    """
-    labels = {
-        "uncovered_threshold_reached": "uncovered-sample target reached",
-        "no_active_terms_remaining": "no active terms remain",
-        "insufficient_antecedent_coverage": (
-            "No further valid signatures met the constraints"
-        ),
-        "no_terms_removed": "used-term removal made no progress",
-    }
-    return labels.get(str(reason), str(reason).replace("_", " "))
-
-
-def _format_signature_for_output(signature: SignatureRecord) -> str:
-    """Render a finalized signature in the report grammar.
-
-    Args:
-        signature: Finalized signature record.
-
-    Returns:
-        Human-readable text for one signature.
-    """
-    termination_text = _format_signature_termination_reason(
-        signature.termination_reason
-    )
-    lines = [
-        f"Signature #{signature.signature_id}:",
-        f"({termination_text})",
-        signature.antecedent_text,
-        signature.consequent_text,
-    ]
-
-    if signature.scaling_text:
-        lines.append(signature.scaling_text.rstrip())
-
-    return "\n".join(lines)
-
-
-def _write_text_atomically(
-    output_path: str,
-    content: str,
-    *,
-    encoding: str = "utf-8",
-) -> None:
-    """Write complete text using atomic file replacement.
-
-    The temporary file is created in the destination directory so that
-    ``os.replace`` operates within the same filesystem. The existing
-    output remains untouched unless the complete replacement file is
-    written and synchronized successfully.
-
-    Args:
-        output_path: Final destination path.
-        content: Complete text to write.
-        encoding: Text encoding. Defaults to UTF-8.
-
-    Raises:
-        OSError: If the temporary file cannot be written, synchronized,
-            or moved into place.
-    """
-    output_path = os.path.abspath(output_path)
-    output_dir = os.path.dirname(output_path)
-    output_name = os.path.basename(output_path)
-
-    if not os.path.isdir(output_dir):
-        raise FileNotFoundError(
-            f"Output directory does not exist: {output_dir}"
-        )
-
-    temporary_path: str | None = None
-
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding=encoding,
-            newline="\n",
-            dir=output_dir,
-            prefix=f".{output_name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as temporary_file:
-            temporary_path = temporary_file.name
-            temporary_file.write(content)
-            temporary_file.flush()
-            os.fsync(temporary_file.fileno())
-
-        # The temporary file is closed before replacement, which is
-        # required on Windows.
-        os.replace(temporary_path, output_path)
-        temporary_path = None
-
-    finally:
-        # Remove an abandoned temporary file after any failed write or
-        # replace.
-        if temporary_path is not None:
-            try:
-                os.unlink(temporary_path)
-            except FileNotFoundError:
-                pass
-
-
 def generate_output_file(
     run_result: RunCompletionResult,
     output_dir: str,
@@ -4428,20 +3992,11 @@ def generate_output_file(
     """
     output_path = os.path.abspath(os.path.join(output_dir, filename))
 
-    sections: list[str] = []
-
-    if run_result.signatures:
-        sections.extend(
-            _format_signature_for_output(signature)
-            for signature in run_result.signatures
-        )
-    else:
-        sections.append("No signatures were generated.")
-
-    sections.append(run_result.summary())
-
-    # Render the complete file before touching the destination.
-    output_text = "\n\n".join(sections) + "\n"
+    report = SignatureReport(
+        tuple(signature.entry for signature in run_result.signatures),
+        run_result.report_summary(),
+    )
+    output_text = render_signature_report(report)
 
     destination = Path(output_path)
     source_paths = [
@@ -4469,10 +4024,7 @@ def generate_output_file(
         [destination, manifest],
         [destination.parent, destination.parent.parent],
     )
-    _write_text_atomically(
-        output_path=output_path,
-        content=output_text,
-    )
+    write_text_atomically(destination, output_text)
     write_provenance(manifest, outputs=[destination], **record)
     return output_path
 
@@ -4527,8 +4079,9 @@ if __name__ == "__main__":
         print("\nRun complete")
         print(
             "  Stop reason: "
-            + _format_run_termination_reason(
-                run_result.termination_reason
+            + RUN_STOP_LABELS.get(
+                run_result.termination_reason,
+                run_result.termination_reason.replace("_", " "),
             )
             + "."
         )

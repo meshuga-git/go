@@ -99,7 +99,7 @@ def read_tree_topology(path: Path, sample_count: int) -> TreeTopology:
             fail.
         OSError: If reading fails.
     """
-    node_count = _tree_node_count(sample_count)
+    node_count = tree_node_count(sample_count)
     lines = read_utf8_lines(path)
     if len(lines) != sample_count or lines[0].split() != ["root", "0"]:
         raise ValueError(f"{path}: expected root 0 and N-1 split records")
@@ -149,7 +149,7 @@ def read_tree_states(path: Path) -> pd.DataFrame:
     """
     rows = read_csv_rows(path)
     count = len(rows)
-    node_count = _tree_node_count(count)
+    node_count = tree_node_count(count)
     states = np.empty((count, count), dtype=np.int64)
     paths: list[str] = []
     ids: set[str] = set()
@@ -242,10 +242,8 @@ def sample_id(raw_path: str) -> str:
     return ntpath.basename(raw_path)
 
 
-def _tree_node_count(sample_count: int) -> int:
-    """Return number of nodes in a full binary tree with N leaves.
-
-    Return the number of nodes in a full binary tree with N leaves.
+def tree_node_count(sample_count: int) -> int:
+    """Return the number of nodes in a full binary tree with N leaves.
 
     Args:
         sample_count: Number of samples/leaves in the clustering tree.
@@ -408,13 +406,31 @@ def read_snapshots(directory: Path) -> tuple[list[str], np.ndarray]:
         if "\n" in line or not _SNAPSHOT_RE.match(line):
             raise ValueError(f"{name}: not one line of canonical IDs")
         current = np.array(line.split(" "), dtype=np.int64)
+        if current.shape != (count,):
+            raise ValueError(
+                f"{name}: {current.size} node IDs for {count} samples")
         previous = states[:, split.iteration - 1]
         moved = previous == split.parent
-        if (current.shape != (count,)
-                or np.any(current[~moved] != previous[~moved])
-                or set(np.unique(current[moved]).tolist())
-                != {split.retained_child, split.extracted_child}):
-            raise ValueError(f"{name} disagrees with the topology")
+        children = (split.retained_child, split.extracted_child)
+        stray = np.flatnonzero(~moved & (current != previous))
+        if stray.size:
+            k = int(stray[0])
+            raise ValueError(
+                f"{name}: sample {k + 1} moved from node {previous[k]} to "
+                f"{current[k]}; only members of split parent "
+                f"{split.parent} may move")
+        lost = np.flatnonzero(moved & ~np.isin(current, children))
+        if lost.size:
+            k = int(lost[0])
+            raise ValueError(
+                f"{name}: sample {k + 1} left split parent {split.parent} "
+                f"for node {current[k]}, not for child {children[0]} or "
+                f"{children[1]}")
+        for child in children:
+            if not np.any(current[moved] == child):
+                raise ValueError(
+                    f"{name}: split {split.iteration} leaves child {child} "
+                    "empty")
         states[:, split.iteration] = current
     return paths, states
 
@@ -477,7 +493,7 @@ def read_sample_lineages(
         OSError: If the file cannot be read.
     """
     sample_count = len(samples)
-    node_count = _tree_node_count(sample_count)
+    node_count = tree_node_count(sample_count)
     known = set(samples)
     if len(known) != sample_count:
         raise ValueError(f"{path.name}: matrix samples are not unique")
@@ -523,6 +539,26 @@ def read_sample_lineages(
     if len(leaves) != sample_count:
         raise ValueError(f"{path.name}: lineages must end at distinct leaves")
     return {sample: lineages[sample] for sample in samples}
+
+
+def render_sample_lineages(
+    samples: Sequence[str], lineages: dict[str, Sequence[int]]
+) -> str:
+    """Return the text of ``sample_lineages.txt``.
+
+    Args:
+        samples: Sample IDs, in ``matrix_samples.txt`` order.
+        lineages: Each sample's root-to-leaf node IDs, root 0 first.
+
+    Returns:
+        One row per sample: its ID, the number of nodes on its lineage
+        and the node IDs, separated by single spaces.
+    """
+    return "".join(
+        f"{sample} {len(lineages[sample])} "
+        + " ".join(str(node) for node in lineages[sample]) + "\n"
+        for sample in samples
+    )
 
 
 def iter_matrix_rows(
@@ -590,6 +626,28 @@ def read_matrix_values(
         raise ValueError(f"{path.name}: {rows} row(s) for {gene_count} genes")
     return values
 
+
+
+def write_matrix_values(path: Path, values: np.ndarray) -> None:
+    """Write ``matrix_values.txt``.
+
+    Args:
+        path: Destination file.
+        values: Genes-by-samples integers within the int32 range.
+
+    Raises:
+        ValueError: If ``values`` is not a 2-D integer array within
+            int32.
+        OSError: If the file cannot be written.
+    """
+    array = np.asarray(values)
+    if array.ndim != 2 or not np.issubdtype(array.dtype, np.integer):
+        raise ValueError("the matrix must be a 2-D integer array")
+    if array.size and (array.min() < INT32_INFO.min
+                       or array.max() > INT32_INFO.max):
+        raise ValueError("matrix values must lie within the int32 range")
+    pd.DataFrame(array).to_csv(path, header=False, index=False, sep=" ",
+                               lineterminator="\n")
 
 # ======================================================================
 # Tjala's signature report (tjala_output.txt)

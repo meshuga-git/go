@@ -36,7 +36,13 @@ import plotly.graph_objects as go
 from numpy.typing import NDArray
 from scipy.cluster.hierarchy import dendrogram, is_valid_linkage
 
-from compute_variances import (
+from pipeline_formats import (
+    TreeTopology,
+    read_tree_states,
+    read_tree_topology,
+    validate_tree_states,
+)
+from pipeline_io import (
     CANNOT_LINKS_FILE,
     DENDROGRAM_FILE,
     MUST_LINKS_FILE,
@@ -44,12 +50,8 @@ from compute_variances import (
     PARSED_DATA_PROVENANCE_FILE,
     TREE_STATES_FILE,
     TREE_TOPOLOGY_FILE,
-    TreeTopology,
     provenance_path,
-    read_tree_states,
-    read_tree_topology,
     read_utf8_lines,
-    validate_tree_states,
     verify_artifacts,
     verify_provenance,
     write_provenance,
@@ -305,48 +307,6 @@ def map_clusters_to_colors(
 # ======================================================================
 
 
-def load_tree_topology(path: Path, sample_count: int) -> TreeTopology:
-    """Read the shared immutable topology for dendrogram generation.
-
-    Args:
-        path: Authoritative tree-topology path.
-        sample_count: Number of terminal sample leaves.
-
-    Returns:
-        Common validated topology with explicit immutable node IDs.
-
-    Raises:
-        ValueError: If fewer than two samples or invalid splits are
-            supplied.
-        OSError: If the topology cannot be read.
-    """
-    if sample_count < 2:
-        raise ValueError("A dendrogram requires at least two samples")
-    return read_tree_topology(path, sample_count)
-
-
-def _decode_tree_states(
-    compressed_matrix: pd.DataFrame, topology: TreeTopology
-) -> pd.DataFrame:
-    """Cross-check decoded states against the topology.
-
-    Args:
-        compressed_matrix: State matrix decoded by ``read_tree_states``.
-        topology: Validated topology for the same samples.
-
-    Returns:
-        Validated integer matrix in original history row order.
-
-    Raises:
-        ValueError: If state transitions or dimensions disagree.
-    """
-    history = compressed_matrix.copy()
-    data = history.copy()
-    data.insert(0, "0", [str(i) for i in range(len(data))])
-    validate_tree_states(data, topology)
-    return history
-
-
 def build_linkage_matrix(
     topology: TreeTopology,
     leaf_colors: dict[int, str],
@@ -374,9 +334,6 @@ def build_linkage_matrix(
             linkage.
     """
     sample_count = len(topology.leaves)
-    if topology.node_count != 2 * sample_count - 1:
-        raise ValueError("Immutable topology does not have 2N-1 nodes.")
-
     tree_to_linkage: dict[int, int] = {
         leaf_id: linkage_leaf_id
         for linkage_leaf_id, leaf_id in enumerate(topology.leaves)
@@ -394,15 +351,11 @@ def build_linkage_matrix(
             linkage_colors[linkage_id] = generate_random_color(rng)
         return linkage_colors[linkage_id]
 
+    # Replaying the splits backwards resolves both children of each
+    # split before its parent.
     for split in reversed(topology.splits):
-        try:
-            left_node = tree_to_linkage[split.retained_child]
-            right_node = tree_to_linkage[split.extracted_child]
-        except KeyError as exc:
-            raise ValueError(
-                f"Cannot reconstruct immutable parent {split.parent}: child "
-                f"{int(exc.args[0])} has not been resolved."
-            ) from exc
+        left_node = tree_to_linkage[split.retained_child]
+        right_node = tree_to_linkage[split.extracted_child]
 
         left_size = node_sizes[left_node]
         right_size = node_sizes[right_node]
@@ -424,29 +377,7 @@ def build_linkage_matrix(
         node_sizes[new_linkage_id] = merged_size
         tree_to_linkage[split.parent] = new_linkage_id
 
-    expected_immutable = set(range(topology.node_count))
-    if set(tree_to_linkage) != expected_immutable:
-        missing = sorted(expected_immutable - set(tree_to_linkage))
-        raise ValueError(
-            f"Not every immutable node was mapped to SciPy; missing {missing}."
-        )
-    expected_scipy = set(range(topology.node_count))
-    if set(tree_to_linkage.values()) != expected_scipy:
-        raise ValueError(
-            "Immutable-to-SciPy node mapping is not one-to-one and complete."
-        )
-    if tree_to_linkage[topology.root] != topology.node_count - 1:
-        raise ValueError((
-            'Immutable root did not map to the final SciPy '
-            'root node.'
-        ))
-
     z_matrix = np.asarray(z_rows, dtype=np.float64)
-    if z_matrix.shape != (sample_count - 1, 4):
-        raise ValueError(
-            f"Incomplete linkage: expected {sample_count - 1} merges, built "
-            f"{z_matrix.shape[0]}."
-        )
     is_valid_linkage(z_matrix, throw=True, name="z_matrix")
     return z_matrix, linkage_colors, tree_to_linkage
 
@@ -1209,10 +1140,7 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(1)
 
     try:
-        topology_input = (
-            args.topology or args.tree_states.with_name(TREE_TOPOLOGY_FILE)
-        )
-        verify_artifacts([args.tree_states, topology_input])
+        verify_artifacts([args.tree_states, topology_path])
         raw_data = read_tree_states(args.tree_states)
     except (OSError, ValueError, pd.errors.ParserError) as exc:
         print(
@@ -1233,13 +1161,11 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(1)
 
     filenames = raw_data["0"]
-    compressed_matrix = raw_data.drop(columns=["0"])
+    history = raw_data.drop(columns=["0"])
 
     try:
-        topology = load_tree_topology(topology_path, len(raw_data))
-        history = (
-            _decode_tree_states(compressed_matrix, topology)
-        )
+        topology = read_tree_topology(topology_path, len(raw_data))
+        validate_tree_states(raw_data, topology)
     except (OSError, ValueError) as exc:
         print(f"Error: invalid immutable hierarchy: {exc}", file=sys.stderr)
         sys.exit(1)

@@ -38,63 +38,38 @@ from typing import Iterable, TypedDict, cast
 import numpy as np
 import pandas as pd
 
-# Format readers now live in pipeline_formats; they are re-exported
-# here until every script imports them from there (task 2.4).
-from pipeline_formats import (  # noqa: F401
+from pipeline_formats import (
     INT32_INFO,
     SampleLineages,
-    TreeSplit,
-    TreeTopology,
-    _tree_node_count,
     load_tree_states,
     read_sample_expression,
-    read_tree_states,
-    read_tree_topology,
+    render_sample_lineages,
     sample_id,
-    validate_tree_states,
+    tree_node_count,
+    write_matrix_values,
 )
-# Shared names now live in pipeline_io; they are re-exported here
-# until every script imports them from there (task 2.4).
-from pipeline_io import (  # noqa: F401
-    BINARY_VECTORS_FILE,
-    CANNOT_LINKS_FILE,
-    CLUSTERING_PROVENANCE_FILE,
-    CLUSTERING_SOURCE_FILE,
-    DENDROGRAM_FILE,
+from pipeline_io import (
     INPUT_FILES,
     MATRIX_GENES_FILE,
     MATRIX_SAMPLES_FILE,
     MATRIX_VALUES_FILE,
-    MUST_LINKS_FILE,
     NATIVE_FILES_HEADER_FILE,
-    NO_LINKS_FILE,
-    PARSED_DATA_PROVENANCE_FILE,
     PREPARE_MARKER_FILE,
     PREPARED_PROVENANCE_FILE,
-    RECONSTRUCTION_SOURCE_FILE,
     SAMPLE_LINEAGES_FILE,
-    SAMPLE_PATHS_FILE,
     TERM_VARIANCES_FILE,
-    TJALA_OUTPUT_FILE,
     TREE_STATES_FILE,
     TREE_TOPOLOGY_FILE,
-    ProvenanceRecord,
     invalidate_dependents,
-    iter_utf8_lines,
     parse_canonical_int,
-    parse_csv_record,
     parse_decimal_float,
     provenance_path,
-    publication_unchanged,
-    read_csv_rows,
     read_identifiers,
-    read_provenance,
     read_utf8_lines,
-    render_provenance,
+    render_identifiers,
     sha256_file,
     validate_identifier,
     verify_artifacts,
-    verify_provenance,
     write_provenance,
     write_text_atomically,
 )
@@ -170,28 +145,6 @@ class VarianceStageState(TypedDict, total=False):
     input_fingerprint: str
     build: BuildState | None
     variance: VarianceState | None
-
-
-# ======================================================================
-# Block 0: Text Contracts and Artifact Provenance
-# ======================================================================
-
-
-def prompt_input(prompt: str = "") -> str:
-    """Display an interactive prompt on stderr and read one response.
-
-    Args:
-        prompt: Prompt text; no newline is added.
-
-    Returns:
-        User response without the input line terminator.
-
-    Raises:
-        EOFError: If standard input is exhausted.
-        KeyboardInterrupt: If the user interrupts input.
-    """
-    print(prompt, end="", file=sys.stderr, flush=True)
-    return input()
 
 
 # ======================================================================
@@ -418,24 +371,7 @@ def write_state_atomically(out_dir: Path, state: VarianceStageState) -> None:
     state_to_write: dict[str, object] = dict(state)
     state_to_write["schema_version"] = STATE_SCHEMA_VERSION
     payload = json.dumps(state_to_write, indent=2, sort_keys=True) + "\n"
-
-    fd, temporary_name = tempfile.mkstemp(
-        dir=out_dir,
-        prefix=f".{VARIANCE_STATE_FILE}.",
-        suffix=".tmp",
-        text=True,
-    )
-    temporary_path = Path(temporary_name)
-
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
-            fh.write(payload)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(temporary_path, out_dir / VARIANCE_STATE_FILE)
-    except Exception:
-        temporary_path.unlink(missing_ok=True)
-        raise
+    write_text_atomically(out_dir / VARIANCE_STATE_FILE, payload)
 
 
 def invalidate_variance(
@@ -492,30 +428,6 @@ def load_gene_filter(path: str | None) -> set[str] | None:
         genes.add(gene)
 
     return genes
-
-
-def _parse_hierarchy_id(
-    value: object, *, row_number: int, column_number: int
-) -> int:
-    """Parse a canonical nonnegative hierarchy-state identifier.
-
-    Args:
-        value: Decoded field, without automatic normalization.
-        row_number: One-based physical record.
-        column_number: One-based physical field position.
-
-    Returns:
-        Exact nonnegative node ID.
-
-    Raises:
-        ValueError: If spelling or sign violates the state schema.
-    """
-    node_id = parse_canonical_int(
-        str(value), source=f"total_data.csv:{row_number}:{column_number}"
-    )
-    if node_id < 0:
-        raise ValueError("SampleLineages node IDs must be nonnegative")
-    return node_id
 
 
 # ======================================================================
@@ -698,7 +610,7 @@ def _write_staged_inputs(
     for gene in gene_names:
         validate_name(gene, what="gene name", source="expression matrix")
 
-    node_count = _tree_node_count(len(sample_names))
+    node_count = tree_node_count(len(sample_names))
     max_node_id = node_count - 1
 
     for sample in sample_names:
@@ -722,30 +634,17 @@ def _write_staged_inputs(
                 )
 
     (staging_dir / MATRIX_GENES_FILE).write_text(
-        "\n".join(gene_names) + "\n", encoding="utf-8", newline="\n"
+        render_identifiers(gene_names), encoding="utf-8", newline="\n"
     )
     (staging_dir / MATRIX_SAMPLES_FILE).write_text(
-        "\n".join(sample_names) + "\n", encoding="utf-8", newline="\n"
+        render_identifiers(sample_names), encoding="utf-8", newline="\n"
     )
     (staging_dir / SAMPLE_LINEAGES_FILE).write_text(
-        "\n".join(
-            f"{sample} {len(hierarchy[sample])} "
-            + " ".join(str(node_id) for node_id in hierarchy[sample])
-            for sample in sample_names
-        )
-        + "\n",
-        encoding="utf-8",
-        newline="\n",
+        render_sample_lineages(sample_names, hierarchy),
+        encoding="utf-8", newline="\n",
     )
-
-    integer_matrix = to_integer_matrix(matrix)
-    integer_matrix.to_csv(
-        staging_dir / MATRIX_VALUES_FILE,
-        header=False,
-        index=False,
-        sep=" ",
-        lineterminator="\n",
-    )
+    write_matrix_values(staging_dir / MATRIX_VALUES_FILE,
+                        to_integer_matrix(matrix).to_numpy())
 
 
 def publish_inputs(

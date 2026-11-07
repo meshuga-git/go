@@ -48,9 +48,7 @@ def main() -> None:
 
         np.random.default_rng = seeded
 
-    shared = None
     if hashlog is not None:
-        import compute_variances as shared  # noqa: PLC0415
         import pipeline_io  # noqa: PLC0415
 
         counts: collections.Counter[str] = collections.Counter()
@@ -68,17 +66,12 @@ def main() -> None:
                 encoding="utf-8",
             )
 
-        # Patch the helper where it lives and where it is re-exported.
+        # Patch the helper before any script module imports it, so that
+        # every "from pipeline_io import sha256_file" binds the counter.
         pipeline_io.sha256_file = counting
-        shared.sha256_file = counting
         atexit.register(dump)
 
     sys.argv = [target, *args[1:]]
-    if shared is not None and Path(target).name == "compute_variances.py":
-        # Running the file as __main__ would create a second module
-        # object that the hook does not see; call its entry point on
-        # the hooked module instead, as its own __main__ block does.
-        sys.exit(shared.main(args[1:]))
     runpy.run_path(target, run_name="__main__")
 
 

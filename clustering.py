@@ -6,8 +6,6 @@ working-directory contract; generated inputs require valid provenance.
 
 from __future__ import annotations
 
-import csv
-import io
 import json
 import os
 import re
@@ -18,7 +16,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from compute_variances import (
+from pipeline_formats import read_snapshots, render_sample_expression
+from pipeline_io import (
     CANNOT_LINKS_FILE,
     CLUSTERING_PROVENANCE_FILE,
     CLUSTERING_SOURCE_FILE,
@@ -27,15 +26,12 @@ from compute_variances import (
     PARSED_DATA_PROVENANCE_FILE,
     SAMPLE_PATHS_FILE,
     TREE_TOPOLOGY_FILE,
-    TreeTopology,
     invalidate_dependents,
-    parse_canonical_int,
     parse_decimal_float,
     prompt_input,
     provenance_path,
     read_csv_rows,
     read_provenance,
-    read_tree_topology,
     read_utf8_lines,
     sha256_file,
     validate_identifier,
@@ -608,17 +604,14 @@ def write_sample_csvs(
                 if output.exists():
                     raise FileExistsError(
                         f"Refusing to overwrite unowned file: {output}")
-                buffer = io.StringIO(newline="")
-                writer = csv.writer(buffer, lineterminator="\n")
-                writer.writerow(["gene", "expression"])
-                for number, (gene, value) in enumerate(
-                    zip(dataframe["gene"], dataframe[expression_column]), 2
-                ):
-                    number_value = parse_decimal_float(
-                        str(value), source=f"{file_path}:{number}"
-                    )
-                    writer.writerow([gene, format(number_value, ".17g")])
-                write_text_atomically(output, buffer.getvalue())
+                values = [
+                    parse_decimal_float(str(value),
+                                        source=f"{file_path}:{number}")
+                    for number, value in enumerate(
+                        dataframe[expression_column], 2)
+                ]
+                write_text_atomically(output, render_sample_expression(
+                    dataframe["gene"], values))
                 generated_files.append(str(output))
                 categories[name] = str(Path(file_path).resolve().parent)
                 print(f"Sample {len(seen)} parsed to CSV: {name}",
@@ -795,113 +788,15 @@ def _clean_clustering_results(output_dir: Path) -> None:
         path.unlink()
 
 
-def _read_required_lines(path: Path, *, description: str) -> list[str]:
-    """Read a literal text output with common transport rules.
-
-    Read a required literal text output with the common transport rules.
-
-    Args:
-        path: Required output file.
-        description: Human-readable role for the error context.
-
-    Returns:
-        Nonblank physical records in file order.
-
-    Raises:
-        ValueError: If the required output is empty or malformed.
-        OSError: If the file is unavailable.
-    """
-    return read_utf8_lines(path)
-
-
-def _load_tree_topology(path: Path, sample_count: int) -> TreeTopology:
-    """Return the common validated immutable topology.
-
-    Args:
-        path: Authoritative topology file.
-        sample_count: Number of ordered sample paths.
-
-    Returns:
-        The same ``TreeTopology`` model used by every Python consumer.
-
-    Raises:
-        ValueError: If topology records violate the immutable contract.
-        OSError: If reading fails.
-    """
-    return read_tree_topology(path, sample_count)
-
-
-def _read_iteration_assignments(
-    path: Path,
-    *,
-    sample_count: int,
-    max_node_id: int,
-) -> list[int]:
-    """Read one immutable ``iterK.txt`` assignment vector.
-
-    Args:
-        path: Iteration output file.
-        sample_count: Required number of assignments.
-        max_node_id: Largest valid immutable node ID.
-
-    Returns:
-        One immutable node ID per sample.
-
-    Raises:
-        RuntimeError: If the vector is unreadable, malformed, or out of
-            range.
-    """
-    if not path.is_file():
-        raise RuntimeError((
-            f'Missing required clustering iteration file: '
-            f'{path}'
-        ))
-    try:
-        tokens = " ".join(read_utf8_lines(path)).split()
-    except (OSError, UnicodeError) as exc:
-        raise RuntimeError((
-            f'Could not read clustering iteration file '
-            f'{path}: {exc}'
-        )) from exc
-
-    if len(tokens) != sample_count:
-        raise RuntimeError(
-            (
-                f'{path.name} must contain exactly {sample_count} '
-                f'sample assignment(s); found {len(tokens)}.'
-            )
-        )
-
-    assignments: list[int] = []
-    for position, token in enumerate(tokens, start=1):
-        try:
-            node_id = parse_canonical_int(token, source=f"{path}:1:{position}")
-        except ValueError as exc:
-            raise RuntimeError(
-                f"{path.name} contains non-integer node ID {token!r} at "
-                f"sample position {position}."
-            ) from exc
-        if not 0 <= node_id <= max_node_id:
-            raise RuntimeError(
-                (
-                    f'{path.name} contains out-of-range immutable '
-                    f'node ID {node_id} at sample position '
-                    f'{position}; valid IDs are 0..{max_node_id}.'
-                )
-            )
-        assignments.append(node_id)
-    return assignments
-
-
 def _validate_clustering_outputs(output_dir: Path) -> (
     tuple[int, int]
 ):
     """Validate the complete immutable clustering output contract.
 
     This is intentionally stronger than checking the executable's return
-    code. It rejects stale/partial output sets and cross-checks every
-    ``iterK.txt`` transition against the authoritative
-    ``tree_splits.txt`` record.
+    code. It rejects stale or partial output sets, and
+    ``read_snapshots`` checks every ``iterK.txt`` transition against
+    the authoritative ``tree_splits.txt`` record.
 
     Args:
         output_dir: Directory populated by the clustering executable.
@@ -910,35 +805,20 @@ def _validate_clustering_outputs(output_dir: Path) -> (
         ``(sample_count, node_count)`` for status reporting.
 
     Raises:
-        RuntimeError: If any required artifact or immutable-tree
-            invariant fails.
+        RuntimeError: If the set of iteration files is incomplete or
+            has extras.
+        ValueError: If an output breaks its format or disagrees with
+            the topology.
+        OSError: If an output cannot be read.
     """
-    filename_lines = _read_required_lines(
-        output_dir / SAMPLE_PATHS_FILE,
-        description=SAMPLE_PATHS_FILE,
-    )
-    sample_count = len(filename_lines)
-    topology = _load_tree_topology(
-        output_dir / TREE_TOPOLOGY_FILE,
-        sample_count,
-    )
-
+    sample_count = len(read_utf8_lines(output_dir / SAMPLE_PATHS_FILE))
     expected_iterations = set(range(1, sample_count))
-    actual_iterations: set[int] = set()
-    unexpected_iteration_files: list[str] = []
-    for entry in output_dir.iterdir():
-        if not entry.is_file() or not entry.name.startswith("iter"):
-            continue
-        match = _ITERATION_FILE_RE.fullmatch(entry.name)
-        if match is None:
-            continue
-        actual_iterations.add(int(match.group(1)))
-
-    if unexpected_iteration_files:
-        raise RuntimeError(
-            "Unexpected iteration-like output file(s) produced: "
-            f"{sorted(unexpected_iteration_files)}."
-        )
+    actual_iterations = {
+        int(match.group(1))
+        for entry in output_dir.iterdir()
+        if entry.is_file()
+        and (match := _ITERATION_FILE_RE.fullmatch(entry.name)) is not None
+    }
     if actual_iterations != expected_iterations:
         missing = sorted(expected_iterations - actual_iterations)
         extra = sorted(actual_iterations - expected_iterations)
@@ -949,85 +829,8 @@ def _validate_clustering_outputs(output_dir: Path) -> (
                 f'extra={extra}.'
             )
         )
-
-    node_count = 2 * sample_count - 1
-    max_node_id = node_count - 1
-    previous = [0] * sample_count
-    active_nodes = {0}
-
-    for split in topology.splits:
-        iteration, parent = split.iteration, split.parent
-        retained_child = split.retained_child
-        extracted_child = split.extracted_child
-        current = _read_iteration_assignments(
-            output_dir / f"iter{iteration}.txt",
-            sample_count=sample_count,
-            max_node_id=max_node_id,
-        )
-        retained_count = 0
-        extracted_count = 0
-        for sample_position, (before, after) in enumerate(
-            zip(previous, current, strict=True),
-            start=1,
-        ):
-            if before == parent:
-                if after == retained_child:
-                    retained_count += 1
-                elif after == extracted_child:
-                    extracted_count += 1
-                else:
-                    raise RuntimeError(
-                        (
-                            f'iter{iteration}.txt sample position '
-                            f'{sample_position} belongs to split parent '
-                            f'{parent} but moved to node {after}; expected '
-                            f'child {retained_child} or {extracted_child}.'
-                        )
-                    )
-            elif after != before:
-                raise RuntimeError(
-                    (
-                        f'iter{iteration}.txt sample position '
-                        f'{sample_position} changed from unrelated active '
-                        f'node {before} to {after}; only parent {parent} '
-                        f'may change during split {iteration}.'
-                    )
-                )
-
-        if retained_count == 0 or extracted_count == 0:
-            raise RuntimeError(
-                f"Split {iteration} produced an empty immutable child: "
-                f"node {retained_child} has {retained_count} sample(s), "
-                f"node {extracted_child} has {extracted_count} sample(s)."
-            )
-
-        active_nodes.remove(parent)
-        active_nodes.update((retained_child, extracted_child))
-        actual_active = set(current)
-        if actual_active != active_nodes:
-            raise RuntimeError(
-                (
-                    f'iter{iteration}.txt active-node set does not '
-                    f'match topology; expected '
-                    f'{sorted(active_nodes)}, found '
-                    f'{sorted(actual_active)}.'
-                )
-            )
-        previous = current
-
-    final_assignments = previous
-    if len(set(final_assignments)) != sample_count:
-        raise RuntimeError(
-            "Final immutable clustering state must assign every sample to a "
-            "distinct terminal leaf."
-        )
-    if set(final_assignments) != active_nodes:
-        raise RuntimeError(
-            "Final iteration leaf IDs do not match the active leaves declared "
-            f"by {TREE_TOPOLOGY_FILE}."
-        )
-
-    return sample_count, node_count
+    read_snapshots(output_dir)
+    return sample_count, 2 * sample_count - 1
 
 
 def _collect_link_folders() -> list[str]:

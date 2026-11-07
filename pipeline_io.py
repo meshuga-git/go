@@ -5,9 +5,9 @@ Requires Python 3.10 or newer; uses only the standard library.
 The module holds the pieces every stage shares and that do not need
 NumPy: the names of the pipeline's artifacts, UTF-8 and CSV transport,
 the machine grammar for identifiers and numbers, the per-process hash
-memo, the provenance records that link each output to its inputs, and
-the one atomic writer. Format readers and writers live in
-pipeline_formats.py.
+memo, the provenance records that link each output to its inputs, the
+one atomic writer, and the prompt that reads one answer from the
+console. Format readers and writers live in pipeline_formats.py.
 """
 
 from __future__ import annotations
@@ -71,6 +71,23 @@ _STAGE_NAMES = {
     "reconstruct", "prepare", "variances", "signatures", "cluster_export",
     "signature_export", "dendrogram",
 }
+
+
+def prompt_input(prompt: str = "") -> str:
+    """Display an interactive prompt on stderr and read one response.
+
+    Args:
+        prompt: Prompt text; no newline is added.
+
+    Returns:
+        User response without the input line terminator.
+
+    Raises:
+        EOFError: If standard input is exhausted.
+        KeyboardInterrupt: If the user interrupts input.
+    """
+    print(prompt, end="", file=sys.stderr, flush=True)
+    return input()
 
 
 def iter_utf8_lines(path: Path) -> Iterator[str]:
@@ -296,6 +313,18 @@ def read_identifiers(path: Path, *, label: str) -> list[str]:
             raise ValueError(f"{path}:{number}: duplicate {label} {value!r}")
         seen.add(value)
     return values
+
+
+def render_identifiers(values: Iterable[str]) -> str:
+    """Return the text of an identifier list, one per line.
+
+    Args:
+        values: Identifiers, in order.
+
+    Returns:
+        The identifiers, each followed by a newline.
+    """
+    return "".join(f"{value}\n" for value in values)
 
 
 TEMPORARY_SUFFIX = ".tmp"

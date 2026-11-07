@@ -20,17 +20,20 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from compute_variances import (
+from pipeline_formats import (
+    TreeTopology,
+    read_tree_states,
+    read_tree_topology,
+    render_cluster_list,
+    validate_tree_states,
+)
+from pipeline_io import (
     TREE_STATES_FILE,
     TREE_TOPOLOGY_FILE,
     invalidate_dependents,
-    TreeTopology,
     prompt_input,
     provenance_path,
     publication_unchanged,
-    read_tree_states,
-    read_tree_topology,
-    validate_tree_states,
     verify_artifacts,
     write_provenance,
     write_text_atomically,
@@ -60,57 +63,6 @@ class ClusterView:
 # ======================================================================
 # Block 1: Hierarchy Input
 # ======================================================================
-
-
-def load_tree_states(filepath: str | Path) -> pd.DataFrame:
-    """Read and decode the compressed hierarchy history.
-
-    Args:
-        filepath: Headerless ``total_data.csv`` path.
-
-    Returns:
-        Literal sample paths and N integer history columns for N
-        samples.
-
-    Raises:
-        ValueError: If the common history-format contract is violated.
-        OSError: If the input cannot be read.
-    """
-    return read_tree_states(Path(filepath))
-
-
-def load_tree_topology(filepath: str | Path, sample_count: int) -> (
-    TreeTopology
-):
-    """Read the common immutable tree-topology model.
-
-    Args:
-        filepath: Authoritative topology input.
-        sample_count: Number of terminal sample leaves.
-
-    Returns:
-        A validated topology shared by the Python stages.
-
-    Raises:
-        ValueError: If the topology is malformed.
-        OSError: If the input cannot be read.
-    """
-    return read_tree_topology(Path(filepath), sample_count)
-
-
-def validate_history_against_topology(
-    data: pd.DataFrame, topology: TreeTopology
-) -> None:
-    """Check history transitions against the immutable topology.
-
-    Args:
-        data: Decoded compressed hierarchy history.
-        topology: Topology for the same sample set.
-
-    Raises:
-        ValueError: If a state transition disagrees with the topology.
-    """
-    validate_tree_states(data, topology)
 
 
 # ======================================================================
@@ -284,7 +236,7 @@ def _write_leaf_cluster_file(view: ClusterView) -> Path:
         ValueError: If input provenance is invalid.
     """
     cluster_filename = Path(f"cluster_{view.node_id}.txt")
-    cluster_text = ", ".join(map(str, view.leaf_subclusters)) + "\n"
+    cluster_text = render_cluster_list(view.leaf_subclusters)
     record = {
         "stage": "cluster_export",
         "inputs": [Path(TREE_STATES_FILE), Path(TREE_TOPOLOGY_FILE)],
@@ -414,9 +366,9 @@ def main() -> None:
     """Run the command-line workflow."""
     try:
         verify_artifacts([Path(TREE_STATES_FILE), Path(TREE_TOPOLOGY_FILE)])
-        data = load_tree_states(Path(TREE_STATES_FILE))
-        topology = load_tree_topology(Path(TREE_TOPOLOGY_FILE), len(data))
-        validate_history_against_topology(data, topology)
+        data = read_tree_states(Path(TREE_STATES_FILE))
+        topology = read_tree_topology(Path(TREE_TOPOLOGY_FILE), len(data))
+        validate_tree_states(data, topology)
     except FileNotFoundError as exc:
         print((
             f'Error: required input file not found: '

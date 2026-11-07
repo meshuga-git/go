@@ -52,9 +52,29 @@ request into `main`; each task is one commit.
   pushing) and regression tests before each commit.
 - `pipeline_io.py` imports only the standard library: constants and
   artifact owners, UTF-8 and CSV transport, machine grammar, the hash
-  memo, today's provenance code and one atomic writer. Until 2.4,
-  `compute_variances.py` re-exports these names so the other scripts
-  keep importing them from there.
+  memo, today's provenance code and one atomic writer. Since task 2.4
+  every script imports from the core modules directly; `tjala.py`
+  still imports `validate_variance_output` from `compute_variances.py`
+  until task 4.2 removes it. The console prompt moved into
+  `pipeline_io.py` in 2.4, so that no script depends on
+  `compute_variances.py` for it; task 3.1 moves prompting into
+  `pipeline_cli.py`.
+- Task 2.4 routes the five format writers through pipeline_formats
+  (the lineages, matrix and identifier lists of the variance
+  preparation, Tjala's report, the cannot-cluster list and the
+  per-sample CSVs) and deletes the duplicate readers (the lineage and
+  matrix readers of Tjala and of the signature export, the export's
+  report parser, Tjala's list reader and clustering's snapshot
+  reader), the extra node-count checks of Tjala and the signature
+  export, the pass-through wrappers, `_decode_tree_states`, the
+  linkage checks that the validated topology already guarantees
+  (SciPy's `is_valid_linkage` stays) and `_parse_hierarchy_id`. Tjala,
+  the signature export and the variance state now write through
+  pipeline_io's atomic writer, which also removes the signature
+  export's private temporary-file code that task 5.4 names; their
+  outputs get permissions from the umask, like every other output.
+  Readers now apply the producer's rules: matrix values outside int32,
+  lineages out of node order and malformed reports are rejected.
 - `pipeline_formats.py` may import NumPy and pandas: topology, tree
   states (history), snapshots, lineages, matrix, signature report,
   cannot-cluster list, per-sample CSVs, and the Python history writer
@@ -225,7 +245,7 @@ request into `main`; each task is one commit.
 | 2.1 | Create pipeline_io.py from Block 0 of compute_variances.py: constants and artifact owners, UTF-8 and CSV... | Done |
 | 2.2 | Create pipeline_formats.py: topology, snapshots, history reader and validator, lineages, the matrix... | Done |
 | 2.3 | Create pipeline_native.py from the MSVC-capable helper in compute_variances.py, adding vswhere, MinGW and... | Done |
-| 2.4 | Switch every script to the core and delete what it replaces: five writers, four duplicate readers, three... | Not started |
+| 2.4 | Switch every script to the core and delete what it replaces: five writers, four duplicate readers, three... | Done |
 | 2.5 | Make producer a required argument of the manifest writer. | Not started |
 | 2.6 | Replace repeated literals with the constants: clustering_results, the parsed-data suffixes, .provenance,... | Not started |
 | 2.7 | Delete the 10 unused imports and the if True: blocks. | Done |
