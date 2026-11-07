@@ -78,6 +78,10 @@ request into `main`; each task is one commit.
   matrix, variance, Tjala and dendrogram outputs are byte-identical
   across Linux and Windows. MSVC and MinGW differ only in
   `compute_variances_state.json`, which names the compiler family.
+- Phase 1: provenance records name absolute paths, so a results folder
+  that is copied or moved loses the links between its outputs and their
+  parents; invalidation then misses them. Phase 5's relative paths and
+  `relocate` command address this.
 - Phase 0 baseline (`tests/baselines/linux-gcc-py310.json`): the
   shared SHA-256 helper runs 1,024 times in the 22-sample variance
   stage and 10,754 times on the timing set, up to 28 times for one
@@ -106,7 +110,7 @@ request into `main`; each task is one commit.
 
 | Task | Summary | Status |
 | --- | --- | --- |
-| 1.1 | Remove the deletion that clustering.py runs before its first prompt (lines 1036–1040). Results are... | Not started |
+| 1.1 | Remove the deletion that clustering.py runs before its first prompt (lines 1036–1040). Results are... | Done |
 | 1.2 | Compare hashes before replacing an output. An identical result is not rewritten and invalidates nothing... | Not started |
 | 1.3 | Check the pheromone sum with math.fsum against a tolerance that grows with the number of active terms (n·ε). | Not started |
 | 1.4 | Remove the symlink refusal from cleanup. | Not started |

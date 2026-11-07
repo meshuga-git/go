@@ -1033,11 +1033,6 @@ def main() -> int:
             "directory containing the C++ source."
         )
 
-    results = Path("clustering_results")
-    if results.is_dir():
-        invalidate_dependents(
-            [results / CLUSTERING_PROVENANCE_FILE], [results, results.parent]
-        )
     distance_metric = prompt_distance_metric()
 
     # Validate that at least one folder was provided before any
