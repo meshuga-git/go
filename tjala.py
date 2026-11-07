@@ -22,7 +22,7 @@ from typing import Any, TypedDict, cast
 import numpy as np
 import pandas as pd
 
-from pipeline_cli import prompt_input
+from pipeline_cli import Reask, ask, human_float, human_int, prompt_input
 from pipeline_formats import (
     RUN_STOP_LABELS,
     SCALE_FACTORS,
@@ -330,26 +330,26 @@ def prompt_int(
     Returns:
         The validated integer.
     """
-    while True:
-        prompt_text = (
-            f"{prompt} (default: {default}): "
-            if default is not None
-            else f"{prompt}: "
-        )
-        val = prompt_input(prompt_text).strip()
-        if not val and default is not None:
+    prompt_text = (
+        f"{prompt} (default: {default}): "
+        if default is not None
+        else f"{prompt}: "
+    )
+
+    def convert(answer: str) -> int:
+        """Return the number an answer names, or the default."""
+        if not answer.strip() and default is not None:
             return default
         try:
-            val = int(val)
-            if val < min_val:
-                print(f"Invalid input. Value must be at least {min_val}.",
-                    file=sys.stderr)
-                continue
-            return val
+            value = human_int(answer)
         except ValueError:
-            print((
-                'Invalid input. Please enter a whole number.'
-            ), file=sys.stderr)
+            raise Reask(
+                "Invalid input. Please enter a whole number.") from None
+        if value < min_val:
+            raise Reask(f"Invalid input. Value must be at least {min_val}.")
+        return value
+
+    return ask(prompt_text, convert)
 
 
 def prompt_float(
@@ -370,25 +370,26 @@ def prompt_float(
     Returns:
         The validated floating-point value.
     """
-    while True:
-        prompt_text = (
-            f"{prompt} (default: {default}): "
-            if default is not None
-            else f"{prompt}: "
-        )
-        val = prompt_input(prompt_text).strip()
-        if not val and default is not None:
+    prompt_text = (
+        f"{prompt} (default: {default}): "
+        if default is not None
+        else f"{prompt}: "
+    )
+
+    def convert(answer: str) -> float:
+        """Return the number an answer names, or the default."""
+        if not answer.strip() and default is not None:
             return default
         try:
-            val = float(val)
-            if not (min_val <= val <= max_val):
-                print(
-                    f"Invalid input. Value must be between {min_val} "
-                    f"and {max_val}.", file=sys.stderr)
-                continue
-            return val
+            value = human_float(answer)
         except ValueError:
-            print("Invalid input. Please enter a number.", file=sys.stderr)
+            raise Reask("Invalid input. Please enter a number.") from None
+        if not min_val <= value <= max_val:
+            raise Reask(f"Invalid input. Value must be between {min_val} "
+                        f"and {max_val}.")
+        return value
+
+    return ask(prompt_text, convert)
 
 
 def prompt_parameters() -> RunParameters:
@@ -450,26 +451,24 @@ def prompt_parameters() -> RunParameters:
         default=10,
     )
 
-    while True:
-        val = prompt_input(
-            "Path to a file listing cannot-cluster IDs (Enter to skip): "
-        ).strip()
-        if not val:
-            params["cannot_clusters_path"] = None
-            params["max_cannot_cluster_share"] = None
-            break
-        elif os.path.isfile(val):
-            params["cannot_clusters_path"] = val
-            params["max_cannot_cluster_share"] = prompt_float(
-                "Share of covered samples that may belong to cannot "
-                "clusters [0–1]",
-                default=0.05,
-            )
-            break
-        else:
-            print(
-                f"File not found at '{val}'. Please check the path "
-                "and try again.", file=sys.stderr)
+    def cannot_answer(answer: str) -> str | None:
+        """Return the cannot-cluster file an answer names, if any."""
+        path = answer.strip()
+        if path and not os.path.isfile(path):
+            raise Reask(f"File not found at '{path}'. Please check the path "
+                        "and try again.")
+        return path or None
+
+    params["cannot_clusters_path"] = ask(
+        "Path to a file listing cannot-cluster IDs (Enter to skip): ",
+        cannot_answer)
+    params["max_cannot_cluster_share"] = None
+    if params["cannot_clusters_path"] is not None:
+        params["max_cannot_cluster_share"] = prompt_float(
+            "Share of covered samples that may belong to cannot "
+            "clusters [0–1]",
+            default=0.05,
+        )
 
     cannot_limit = params.get("max_cannot_cluster_share")
     cannot_text = (

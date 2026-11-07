@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
-from pipeline_cli import prompt_input
+from pipeline_cli import Reask, ask, human_int, is_word
 from pipeline_formats import (
     Signature,
     iter_matrix_rows,
@@ -95,37 +95,30 @@ def prompt_for_signature(signatures: list[Signature]) -> Signature | None:
     by_number = {signature.number: signature for signature in signatures}
     highest = len(signatures)
 
-    while True:
-        try:
-            response = prompt_input(
-                f'Enter signature number to consider, from 1 to {highest} '
-                '(or "Exit" (without quotes) to end): '
-            ).strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\nExiting program.")
+    def convert(answer: str) -> Signature | None:
+        """Return the signature an answer names, or None for Exit."""
+        if is_word(answer, "Exit"):
             return None
-
-        if response.lower() == "exit":
-            print("Exiting program.")
-            return None
-
         try:
-            number = int(response)
+            number = human_int(answer)
         except ValueError:
-            print((
-                'Signature number is not an integer, please try '
-                'again.'
-            ), file=sys.stderr)
-            continue
-
+            raise Reask("Signature number is not an integer, please try "
+                        "again.") from None
         signature = by_number.get(number)
         if signature is None:
-            print((
-                'Signature number out of range, please try again.'
-            ), file=sys.stderr)
-            continue
-
+            raise Reask("Signature number out of range, please try again.")
         return signature
+
+    try:
+        selected = ask(
+            f'Enter signature number to consider, from 1 to {highest} '
+            '(or "Exit" (without quotes) to end): ', convert)
+    except (EOFError, KeyboardInterrupt):
+        print("\nExiting program.")
+        return None
+    if selected is None:
+        print("Exiting program.")
+    return selected
 
 
 def validate_signature_genes(

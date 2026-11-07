@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from pipeline_cli import prompt_input
+from pipeline_cli import Reask, ask, human_int, is_word
 from pipeline_formats import (
     read_sample_paths,
     read_snapshots,
@@ -71,20 +71,28 @@ Reader = Callable[[str], pd.DataFrame]
 
 
 def prompt_distance_metric() -> str:
-    """Prompt the user to choose a supported distance metric."""
+    """Prompt the user to choose a supported distance metric.
+
+    Returns:
+        The key of the chosen metric in ``DISTANCE_METRICS``.
+    """
     print("Choose a distance metric:", file=sys.stderr)
     for key, name in DISTANCE_METRICS.items():
         print(f"  {key} - {name}", file=sys.stderr)
 
-    while True:
-        choice = (
-            prompt_input("Enter the number of the distance metric: ").strip()
-        )
-        if choice in DISTANCE_METRICS:
-            return choice
-        print(
-            "Invalid choice. Please enter one of "
-            f"{', '.join(DISTANCE_METRICS)}.\n", file=sys.stderr)
+    def convert(answer: str) -> str:
+        """Return the menu key an answer names."""
+        try:
+            choice = str(human_int(answer))
+        except ValueError:
+            choice = ""
+        if choice not in DISTANCE_METRICS:
+            raise Reask(
+                "Invalid choice. Please enter one of "
+                f"{', '.join(DISTANCE_METRICS)}.\n")
+        return choice
+
+    return ask("Enter the number of the distance metric: ", convert)
 
 
 def _split_paths(value: str) -> list[str]:
@@ -144,33 +152,28 @@ def prompt_folder_paths(prompt_text: str, expected_count: int) -> list[str]:
         EOFError: If standard input ends before a valid response.
         KeyboardInterrupt: If the user interrupts the prompt.
     """
-    while True:
-        print(prompt_text, file=sys.stderr)
-        value = prompt_input().strip()
 
-        if value.lower() == "none":
+    def convert(answer: str) -> list[str]:
+        """Return the folders an answer names, or none for None."""
+        value = answer.strip()
+        if is_word(value, "None"):
             return []
-
         try:
             paths = _split_paths(value)
         except ValueError as exc:
-            print(f"Invalid path input: {exc}\n", file=sys.stderr)
-            continue
-
+            raise Reask(f"Invalid path input: {exc}\n") from None
         if len(paths) != expected_count:
-            print(
+            raise Reask(
                 f"Invalid input. Expected exactly {expected_count} paths "
-                'or "None" (without quotes).\n', file=sys.stderr)
-            continue
-
+                'or "None" (without quotes).\n')
         missing = [p for p in paths if not Path(p).is_dir()]
         if missing:
-            print(
+            raise Reask(
                 "Invalid input. The following are not existing "
-                f"directories: {', '.join(missing)}\n", file=sys.stderr)
-            continue
-
+                f"directories: {', '.join(missing)}\n")
         return paths
+
+    return ask(prompt_text + "\n", convert)
 
 
 # ======================================================================

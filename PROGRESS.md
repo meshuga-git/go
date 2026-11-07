@@ -191,6 +191,14 @@ request into `main`; each task is one commit.
   `1_7`, fullwidth digits, `17.0`, `inf` and `nan` are no longer read
   as numbers. Sentinels still compare in any case, and only `y` means
   yes.
+- Task 3.2: clustering.py, samples_by_cluster.py, tjala.py and
+  samples_by_signature.py ask every question through `ask` with
+  today's wording, defaults, sentinels and explanations. The
+  transcripts change in two ways only: an answer such as `1_7` gets
+  the script's "not an integer" explanation and is asked again, and
+  the metric menu takes `02` and `+2` for 2. Tjala's binary-vector
+  inspection menu, which no setting reaches, keeps its own prompts
+  until task 6.6 deletes it.
 
 ## Findings
 
@@ -305,7 +313,7 @@ request into `main`; each task is one commit.
 | Task | Summary | Status |
 | --- | --- | --- |
 | 3.1 | Create pipeline_cli.py: one prompt helper that reproduces today's prompts, defaults and sentinels, plus... | Done |
-| 3.2 | Switch the four prompting scripts to the shared helper, with no change to wording, defaults or sentinels.... | Not started |
+| 3.2 | Switch the four prompting scripts to the shared helper, with no change to wording, defaults or sentinels.... | Done |
 | 3.4 | Add the error classes and run_main() to every script: one tagged line for expected errors, a traceback... | Not started |
 | 3.5 | Console API: prompts, progress, warnings and errors on stderr with the [stage] prefix, README labels and... | Not started |
 | 3.6 | One exception type per condition (for example, unknown term IDs), and integrity failures raise... | Not started |

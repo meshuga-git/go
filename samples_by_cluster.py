@@ -20,7 +20,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from pipeline_cli import prompt_input
+from pipeline_cli import Reask, ask, human_int, is_word, is_yes, prompt_input
 from pipeline_formats import (
     TreeTopology,
     read_tree_states,
@@ -394,27 +394,25 @@ def main() -> None:
 
     cluster_range = valid_cluster_range(topology)
 
-    while True:
-        cluster_input = prompt_input(
-            "Enter immutable cluster node ID, or 'Exit' to end:\n"
-        ).strip()
-        if cluster_input.lower() == "exit":
-            break
-
+    def cluster_answer(answer: str) -> int | None:
+        """Return the node an answer names, or None for Exit."""
+        if is_word(answer, "Exit"):
+            return None
         try:
-            node_id = int(cluster_input)
+            node_id = human_int(answer)
         except ValueError:
-            print("Cluster node ID should be an integer!", file=sys.stderr)
-            continue
-
+            raise Reask("Cluster node ID should be an integer!") from None
         if node_id not in cluster_range:
-            print(
-                (
-                    f'Cluster node ID out of range - should be '
-                    f'between {cluster_range.start} and '
-                    f'{cluster_range.stop - 1}'
-                ), file=sys.stderr)
-            continue
+            raise Reask(
+                f"Cluster node ID out of range - should be between "
+                f"{cluster_range.start} and {cluster_range.stop - 1}")
+        return node_id
+
+    while True:
+        node_id = ask("Enter immutable cluster node ID, or 'Exit' to end:\n",
+                      cluster_answer)
+        if node_id is None:
+            break
 
         try:
             view = build_cluster_view(data, topology, node_id)
@@ -437,25 +435,21 @@ def main() -> None:
             print(f"Its terminal node ID is listed in file {cluster_filename}")
             continue
 
-        while True:
-            level_input = prompt_input(
-                "Enter tree hierarchy level below this cluster "
-                f"(1-{view.max_level}):\n"
-            ).strip()
-
+        def level_answer(answer: str, deepest: int = view.max_level) -> int:
+            """Return the hierarchy level an answer names."""
             try:
-                level = int(level_input)
+                level = human_int(answer)
             except ValueError:
-                print(
-                    "Hierarchy level should be an integer! "
-                    "Please try once again.\n", file=sys.stderr)
-                continue
+                raise Reask("Hierarchy level should be an integer! "
+                            "Please try once again.\n") from None
+            if not 1 <= level <= deepest:
+                raise Reask("Error: Hierarchy level should be between "
+                            f"1 and {deepest}.")
+            return level
 
-            if not 1 <= level <= view.max_level:
-                print(
-                    "Error: Hierarchy level should be between "
-                    f"1 and {view.max_level}.", file=sys.stderr)
-                continue
+        while True:
+            level = ask("Enter tree hierarchy level below this cluster "
+                        f"(1-{view.max_level}):\n", level_answer)
 
             try:
                 write_cluster_files(data, topology, view, level)
@@ -466,10 +460,9 @@ def main() -> None:
                     f"Error: could not write output files for cluster "
                     f"{node_id}: {exc}", file=sys.stderr)
 
-            yn = prompt_input(
-                f"Do you want to continue with cluster {node_id}? (Y/N)\n"
-            ).strip()
-            if yn.lower() != "y":
+            if not is_yes(prompt_input(
+                    f"Do you want to continue with cluster {node_id}? "
+                    "(Y/N)\n")):
                 break
 
 
