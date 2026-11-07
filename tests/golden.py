@@ -27,9 +27,14 @@ normalized before hashing:
   folder becomes ``nh:`` plus that file's normalized hash, or
   ``<BINARY>`` for a compiled executable. Recorded hashes are still
   checked, but no longer depend on the folder or the compiler build.
-* The compiler path in ``compute_variances_state.json`` becomes
-  ``<COMPILER>``, and the random element id Plotly writes into
-  ``dendrogram.html`` becomes ``<UUID>``.
+* Fields that identify code rather than results become placeholders:
+  the producer line of a provenance record, which hashes the script
+  that wrote it, becomes ``<PRODUCER>``, and the compiler path and
+  source hashes in ``compute_variances_state.json`` become ``<CODE>``.
+  They change with every edit of the code, while the outputs they
+  vouch for are compared in full.
+* The random element id Plotly writes into ``dendrogram.html`` becomes
+  ``<UUID>``.
 
 Child Python processes run with ``PYTHONIOENCODING=utf-8``, as an
 interactive console would give them, and without bytecode caches.
@@ -107,7 +112,10 @@ HEX64 = re.compile(r"\b[0-9a-f]{64}\b")
 UUID = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 )
-COMPILER_FIELD = re.compile(r'("compiler"\s*:\s*)"(?:[^"\\]|\\.)*"')
+CODE_FIELDS = re.compile(
+    r'("(compiler|source_sha256|artifact_header_sha256)"\s*:\s*)'
+    r'"(?:[^"\\]|\\.)*"'
+)
 # The script's own --seed option fixes its otherwise random colors.
 DENDROGRAM_SEED = "7"
 
@@ -338,7 +346,7 @@ class Normalizer:
         if name.endswith(".provenance"):
             text = self._decode_provenance(text)
         if name == "compute_variances_state.json":
-            text = COMPILER_FIELD.sub(r'\1"<COMPILER>"', text)
+            text = CODE_FIELDS.sub(r'\1"<CODE>"', text)
         if name.endswith(".html"):
             text = UUID.sub("<UUID>", text)
         text = HEX64.sub(self._hash_token, text)
@@ -352,7 +360,9 @@ class Normalizer:
         lines = []
         for line in text.split("\n"):
             fields = line.split("\t")
-            if fields[0] in ("I", "O", "P") and len(fields) == 3:
+            if fields[0] == "producer" and len(fields) == 2:
+                fields[1] = "<PRODUCER>"
+            elif fields[0] in ("I", "O", "P") and len(fields) == 3:
                 fields[2] = "path:" + _unhex(fields[2])
             elif fields[0] == "C" and len(fields) == 3:
                 fields[1] = "name:" + _unhex(fields[1])

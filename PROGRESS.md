@@ -47,14 +47,14 @@ request into `main`; each task is one commit.
 
 ## Findings
 
-- Phase 0: on the 300-sample timing set under Python 3.10 (NumPy
-  2.2.6), Tjala stops with "Normalized pheromones do not sum to 1.0:
-  0.9999999999986108" once 839,930 terms are active. Under Python 3.14
-  (NumPy 2.5.4) the same check passes and Tjala finishes with two
-  signatures: whether a run survives depends on how the NumPy version
-  rounds the sum. The golden files record both outcomes as today's
-  behavior; task 1.3 replaces the exact check, and that commit
-  re-records the timing set.
+- Phase 0: on the 300-sample timing set under Python 3.10, Tjala stops
+  with "Normalized pheromones do not sum to 1.0: 0.9999999999986108"
+  once 839,930 terms are active. Under Python 3.14 the same check passes
+  and Tjala finishes with two signatures. The cause is Python's built-in
+  `sum()`, which compensates rounding only from Python 3.12 on, as the
+  register's C12 says; the NumPy version plays no part. The golden
+  files record the failure as today's behavior; task 1.3 replaces the
+  check and re-records the timing set.
 - Phase 0: every other scenario gives byte-identical results with GCC
   and Clang under both Python 3.10 and 3.14.
 - Phase 0, versions: the oldest releases that work on Python 3.10 are
