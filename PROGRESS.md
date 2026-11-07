@@ -45,6 +45,29 @@ request into `main`; each task is one commit.
   replaces the original error, and a stage reports success only after
   its commit.
 
+## Phase 2 working notes
+
+- Order: 2.7, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.9, 2.10, 2.8; one commit
+  per task, golden check (`--skip-slow` while iterating, full before
+  pushing) and regression tests before each commit.
+- `pipeline_io.py` imports only the standard library: constants and
+  artifact owners, UTF-8 and CSV transport, machine grammar, the hash
+  memo, today's provenance code and one atomic writer. Until 2.4,
+  `compute_variances.py` re-exports these names so the other scripts
+  keep importing them from there.
+- `pipeline_formats.py` may import NumPy and pandas: topology, tree
+  states (history), snapshots, lineages, matrix, signature report,
+  cannot-cluster list, per-sample CSVs, and the Python history writer
+  from the review's prototype (`histbench/np_reconstruct.py`).
+- `pipeline_native.py`: compiler from an explicit argument, then `CXX`,
+  then discovery (MSVC through vswhere, MinGW-w64 g++, clang++); cache
+  in the per-user cache folder; `.exe` only on Windows; compiler output
+  streams live. `reconstruct_hierarchy` is built and run through its
+  command line until Phase 4 moves the history to Python.
+- Part 2 runs from copies in `clustering_results`, so the README's copy
+  list and the golden harness's `PACKAGE` and `PART2` lists gain the
+  core modules.
+
 ## Findings
 
 - Phase 0: on the 300-sample timing set under Python 3.10, Tjala stops
