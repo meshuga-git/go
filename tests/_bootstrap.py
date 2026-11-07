@@ -8,7 +8,7 @@ Usage:
 ``--seed`` gives NumPy's unseeded ``default_rng()`` a fixed seed, so
 Tjala is reproducible under the test harness while the program itself
 stays unseeded. ``--hashlog`` counts calls to the shared SHA-256 helper
-in ``compute_variances.py`` per file and writes the counts to PATH as
+in ``pipeline_io.py`` per file and writes the counts to PATH as
 JSON when the script exits. The script otherwise runs as it would with
 ``python SCRIPT ARGS``.
 """
@@ -48,12 +48,11 @@ def main() -> None:
 
         np.random.default_rng = seeded
 
-    shared = None
     if hashlog is not None:
-        import compute_variances as shared  # noqa: PLC0415
+        import pipeline_io  # noqa: PLC0415
 
         counts: collections.Counter[str] = collections.Counter()
-        real_hash = shared.sha256_file
+        real_hash = pipeline_io.sha256_file
 
         def counting(path, *rest, **options):
             """Count one hash of ``path`` and delegate."""
@@ -67,15 +66,12 @@ def main() -> None:
                 encoding="utf-8",
             )
 
-        shared.sha256_file = counting
+        # Patch the helper before any script module imports it, so that
+        # every "from pipeline_io import sha256_file" binds the counter.
+        pipeline_io.sha256_file = counting
         atexit.register(dump)
 
     sys.argv = [target, *args[1:]]
-    if shared is not None and Path(target).name == "compute_variances.py":
-        # Running the file as __main__ would create a second module
-        # object that the hook does not see; call its entry point on
-        # the hooked module instead, as its own __main__ block does.
-        sys.exit(shared.main(args[1:]))
     runpy.run_path(target, run_name="__main__")
 
 

@@ -13,7 +13,7 @@ Python version.
 Usage:
     python make_trees.py PACKAGE_DIR OUT_DIR SAMPLES SEED
 
-PACKAGE_DIR holds ``clustering.py`` and ``compute_variances.py``;
+PACKAGE_DIR holds ``clustering.py`` and ``pipeline_io.py``;
 OUT_DIR becomes the ``clustering_results`` folder.
 """
 
@@ -27,7 +27,7 @@ def main() -> None:
     package, out = Path(sys.argv[1]).resolve(), Path(sys.argv[2])
     n, seed = int(sys.argv[3]), int(sys.argv[4])
     sys.path.insert(0, str(package))
-    import compute_variances  # noqa: PLC0415 - the package under test
+    import pipeline_io  # noqa: PLC0415 - the package under test
 
     rng = random.Random(seed)
 
@@ -68,7 +68,7 @@ def main() -> None:
     (out / "tree_splits.txt").write_bytes(
         ("\n".join(splits) + "\n").encode()
     )
-    compute_variances.write_provenance(
+    pipeline_io.write_provenance(
         out / "clustering.provenance", stage="clustering", outputs=outputs,
         producer=package / "clustering.py",
     )

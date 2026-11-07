@@ -37,7 +37,7 @@ def test_1_6_variance_engine_knows_every_stage_name() -> None:
     A stage the engine does not know makes it ignore that manifest when
     it invalidates dependents, as it did with Tjala's "signatures".
     """
-    python = (REPO / "compute_variances.py").read_text(encoding="utf-8")
+    python = (REPO / "pipeline_io.py").read_text(encoding="utf-8")
     cpp = (REPO / "compute_variances.cpp").read_text(encoding="utf-8")
     assert (_stage_names(r"_STAGE_NAMES = \{(.*?)\}", python)
             == _stage_names(r"std::set<std::string> STAGES\{(.*?)\};", cpp))

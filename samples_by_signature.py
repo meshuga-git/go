@@ -8,119 +8,42 @@ hierarchy-derived output ordering. Requires Python 3.10 or later.
 
 from __future__ import annotations
 
-import math
-import os
-import re
-import secrets
-import stat
 import sys
-from dataclasses import dataclass
 from pathlib import Path
-from typing import TextIO
 
 import numpy as np
 from numpy.typing import NDArray
 
-from compute_variances import (
+from pipeline_formats import (
+    Signature,
+    iter_matrix_rows,
+    load_tree_states,
+    read_sample_lineages,
+    read_signature_report,
+    tree_node_count,
+)
+from pipeline_io import (
     MATRIX_GENES_FILE,
     MATRIX_SAMPLES_FILE,
     MATRIX_VALUES_FILE,
     SAMPLE_LINEAGES_FILE,
     TJALA_OUTPUT_FILE,
-    iter_utf8_lines,
-    parse_canonical_int,
+    TREE_STATES_FILE,
     prompt_input,
     provenance_path,
     read_identifiers,
-    read_utf8_lines,
-    validate_identifier,
     verify_artifacts,
     write_provenance,
+    write_text_atomically,
 )
-
-
-
-_SIGNATURE_HEADER_RE = re.compile(r"^Signature #(\d+):$")
-_CLUSTER_COVERAGE_RE = re.compile(
-    r"^(?P<cluster>.+):\s+"
-    r"(?P<percentage>[+-]?(?:\d+(?:\.\d*)?|\.\d+))%\s+covered$"
-)
-_ALLOWED_OPERATORS = {"<", ">"}
 
 FloatVector = NDArray[np.float64]
 BoolVector = NDArray[np.bool_]
 
 
-@dataclass(frozen=True)
-class Term:
-    """One gene-threshold condition in a Tjala signature.
-
-    Attributes:
-        gene: Literal gene identifier.
-        operator: Strict comparison operator, either ``<`` or ``>``.
-        threshold: Finite comparison threshold from the selected report.
-    """
-
-    gene: str
-    operator: str
-    threshold: float
-
-
-@dataclass(frozen=True)
-class Signature:
-    """A parsed Tjala signature and its hierarchy-ordering clusters.
-
-    Attributes:
-        number: One-based signature number in the report.
-        terms: Ordered terms forming the antecedent
-            conjunction.
-        cluster_ids: Canonical covered-cluster IDs in report section
-            order.
-    """
-
-    number: int
-    terms: tuple[Term, ...]
-    cluster_ids: tuple[str, ...]
-
-
 # ======================================================================
 # Block 1: Input Contracts
 # ======================================================================
-
-
-def normalize_cluster_id(cluster_id: str) -> str:
-    """Validate and return a canonical immutable node-ID string.
-
-    Args:
-        cluster_id: Literal canonical decimal machine field.
-
-    Returns:
-        The unchanged validated nonnegative node-ID spelling.
-
-    Raises:
-        ValueError: If syntax or sign violates the node-ID grammar.
-    """
-    node_id = parse_canonical_int(cluster_id, source="cluster ID")
-    if node_id < 0:
-        raise ValueError("Immutable node ID must be nonnegative")
-    return str(node_id)
-
-
-def _tree_node_count(sample_count: int) -> int:
-    """Return the node count for a full immutable binary hierarchy.
-
-    Args:
-        sample_count: Number of terminal sample leaves.
-
-    Returns:
-        Total immutable node count, ``2 * sample_count - 1``.
-
-    Raises:
-        ValueError: If ``sample_count`` is not positive.
-    """
-    if sample_count <= 0:
-        raise ValueError("sample_count must be positive.")
-    return 2 * sample_count - 1
 
 
 def ensure_required_files(base_path: Path) -> dict[str, Path]:
@@ -155,648 +78,9 @@ def ensure_required_files(base_path: Path) -> dict[str, Path]:
     return paths
 
 
-def _read_utf8_lines(path: Path) -> list[str]:
-    """Read report text with intentional separator lines preserved.
-
-    Args:
-        path: Human-readable signature report or lineage input.
-
-    Returns:
-        Literal UTF-8 records; schema-specific callers validate blanks.
-
-    Raises:
-        ValueError: If transport encoding or terminators are invalid.
-        OSError: If the file cannot be read.
-    """
-    return read_utf8_lines(path, allow_blank=True)
-
-
-def load_identifier_file(path: Path, *, label: str) -> list[str]:
-    """Read unique literal identifiers in physical-file order.
-
-    Args:
-        path: Gene or sample identifier file.
-        label: Identifier kind for diagnostics.
-
-    Returns:
-        Validated identifiers in physical order.
-
-    Raises:
-        ValueError: If identifiers are empty, invalid, or duplicated.
-        OSError: If reading fails.
-    """
-    return read_identifiers(path, label=label)
-
-
-def load_expression_values(
-    path: Path,
-    *,
-    expected_genes: int,
-    expected_samples: int,
-    required_gene_indices: frozenset[int],
-) -> dict[int, FloatVector]:
-    """Validate the matrix and retain only selected gene rows.
-
-    The file is streamed one physical row at a time. Every value is
-    still validated, but only rows needed by the selected signature are
-    retained in memory. An initial UTF-8 BOM is accepted.
-
-    Args:
-        path: ``matrix_values.txt`` path.
-        expected_genes: Required number of matrix rows.
-        expected_samples: Required number of values in each row.
-        required_gene_indices: Zero-based gene rows needed for
-            evaluation.
-
-    Returns:
-        Mapping from original zero-based gene row index to a finite
-        ``float64`` sample vector.
-
-    Raises:
-        ValueError: If required indices are invalid or if the matrix is
-            empty, malformed, nonnumeric, non-finite, or dimensionally
-            inconsistent.
-    """
-    invalid_indices = sorted(
-        index
-        for index in required_gene_indices
-        if index < 0 or index >= expected_genes
-    )
-    if invalid_indices:
-        raise ValueError(
-            f"Required gene index/indices outside the expected range: "
-            f"{invalid_indices}."
-        )
-
-    selected_rows: dict[int, FloatVector] = {}
-    actual_genes = 0
-
-    try:
-        values_file = iter_utf8_lines(path)
-        if True:
-            for row_number, line in enumerate(values_file, start=1):
-                actual_genes = row_number
-                tokens = line.split()
-                if len(tokens) != expected_samples:
-                    raise ValueError(
-                        (
-                            f'Column-count mismatch in {path.name} at row '
-                            f'{row_number}: found {len(tokens)} value(s), '
-                            f'expected {expected_samples} from '
-                            f'{MATRIX_SAMPLES_FILE}.'
-                        )
-                    )
-
-                row_index = row_number - 1
-                retained_row = (
-                    np.empty(expected_samples, dtype=np.float64)
-                    if row_index in required_gene_indices
-                    else None
-                )
-
-                for column_index, token in enumerate(tokens, start=1):
-                    try:
-                        value = float(parse_canonical_int(
-                            token, source=f"{path}:{row_number}:{column_index}"
-                        ))
-                    except ValueError as exc:
-                        raise ValueError(
-                            f"Nonnumeric value in {path.name} at row "
-                            f"{row_number}, column {column_index}: {token!r}."
-                        ) from exc
-
-                    if not math.isfinite(value):
-                        raise ValueError(
-                            f"Non-finite value in {path.name} at row "
-                            f"{row_number}, column {column_index}."
-                        )
-
-                    if retained_row is not None:
-                        retained_row[column_index - 1] = value
-
-                if retained_row is not None:
-                    selected_rows[row_index] = retained_row
-    except UnicodeError as exc:
-        raise ValueError(f"{path.name} is not valid UTF-8.") from exc
-
-    if actual_genes == 0:
-        raise ValueError(f"{path.name} is empty.")
-
-    if actual_genes != expected_genes:
-        raise ValueError(
-            f"Row-count mismatch: {path.name} has {actual_genes} row(s), "
-            f"but {MATRIX_GENES_FILE} has {expected_genes} gene(s)."
-        )
-
-    missing_required_rows = (
-        sorted(required_gene_indices - selected_rows.keys())
-    )
-    if missing_required_rows:
-        raise ValueError(
-            f"Required expression row(s) missing from {path.name}: "
-            f"{missing_required_rows}."
-        )
-
-    return selected_rows
-
-
-def load_sample_lineages(
-    path: Path,
-    *,
-    samples: list[str],
-) -> tuple[frozenset[str], ...]:
-    """Load and validate sample memberships in the immutable tree.
-
-    The immutable hierarchy format is ``sample_id count node_id...``.
-    Rows may appear in any physical order; they are bound to sample IDs
-    explicitly and returned in ``matrix_samples.txt`` order. For ``N``
-    samples, valid immutable node IDs are exactly ``0..2N-2`` and every
-    lineage begins at root node 0.
-
-    Args:
-        path: ``sample_lineages.txt`` path.
-        samples: Unique sample IDs from ``matrix_samples.txt`` in output
-            order.
-
-    Returns:
-        One immutable cluster-membership set per sample, aligned with
-        ``samples``.
-
-    Raises:
-        ValueError: If rows, sample identities, lineage counts, node
-            IDs, root membership, final leaves, or the global
-            immutable-node domain are malformed or inconsistent.
-    """
-    sample_count = len(samples)
-    node_count = _tree_node_count(sample_count)
-    max_node_id = node_count - 1
-    sample_set = set(samples)
-
-    if len(sample_set) != sample_count:
-        raise ValueError(
-            f"{MATRIX_SAMPLES_FILE} contains duplicate sample IDs; immutable "
-            "hierarchy rows cannot be matched unambiguously."
-        )
-
-    lines = _read_utf8_lines(path)
-    if len(lines) != sample_count:
-        raise ValueError(
-            f"Hierarchy/sample mismatch: {path.name} has {len(lines)} "
-            f"physical row(s), but {MATRIX_SAMPLES_FILE} has {sample_count} "
-            "sample(s)."
-        )
-
-    hierarchy_by_sample: dict[str, frozenset[str]] = {}
-    seen_nodes: set[int] = set()
-    final_nodes: set[int] = set()
-
-    for line_number, line in enumerate(lines, start=1):
-        stripped = line.strip()
-        if not stripped:
-            raise ValueError(
-                f"Empty hierarchy row detected in {path.name} at line "
-                f"{line_number}."
-            )
-
-        tokens = stripped.split()
-        if len(tokens) < 3:
-            raise ValueError(
-                f"Hierarchy row {line_number} in {path.name} must contain "
-                "a sample ID, a positive lineage count, and root node 0."
-            )
-
-        sample_id = tokens[0]
-        if sample_id not in sample_set:
-            raise ValueError(
-                f"Hierarchy row {line_number} in {path.name} names unknown "
-                f"sample {sample_id!r}."
-            )
-        if sample_id in hierarchy_by_sample:
-            raise ValueError(
-                f"Hierarchy row {line_number} in {path.name} duplicates "
-                f"sample {sample_id!r}."
-            )
-
-        try:
-            declared_count = parse_canonical_int(
-                tokens[1], source=f"{path}:{line_number}:2"
-            )
-        except ValueError as exc:
-            raise ValueError(
-                f"Hierarchy row {line_number} in {path.name} has a "
-                f"non-integer lineage count: {tokens[1]!r}."
-            ) from exc
-
-        if declared_count <= 0:
-            raise ValueError(
-                f"Hierarchy row {line_number} in {path.name} must declare "
-                "at least root node 0."
-            )
-        if declared_count > sample_count:
-            raise ValueError(
-                f"Hierarchy row {line_number} in {path.name} declares "
-                f"{declared_count} node(s), but an immutable root-to-leaf "
-                f"lineage with {sample_count} leaves can contain at most "
-                f"{sample_count} node(s)."
-            )
-
-        raw_node_ids = tokens[2:]
-        if declared_count != len(raw_node_ids):
-            raise ValueError(
-                f"Hierarchy row {line_number} in {path.name} declares "
-                f"{declared_count} node(s) but contains {len(raw_node_ids)}."
-            )
-
-        node_ids: list[int] = []
-        for raw_node_id in raw_node_ids:
-            try:
-                canonical = normalize_cluster_id(raw_node_id)
-            except ValueError as exc:
-                raise ValueError(
-                    f"Invalid immutable node ID in {path.name} at hierarchy "
-                    f"row {line_number}: {raw_node_id!r}."
-                ) from exc
-            if not canonical:
-                raise ValueError(
-                    f"Hierarchy row {line_number} in {path.name} contains an "
-                    "empty immutable node ID."
-                )
-            node_id = int(canonical)
-            if node_id > max_node_id:
-                raise ValueError(
-                    (
-                        f'Immutable node ID {node_id} in {path.name} at '
-                        f'row {line_number} is outside the valid range '
-                        f'0..{max_node_id} for {sample_count} samples.'
-                    )
-                )
-            node_ids.append(node_id)
-
-        if len(node_ids) != len(set(node_ids)):
-            raise ValueError(
-                f"Hierarchy row {line_number} in {path.name} contains "
-                "duplicate immutable node IDs."
-            )
-        if node_ids[0] != 0:
-            raise ValueError(
-                f"Hierarchy row {line_number} in {path.name} must begin with "
-                "immutable root node 0."
-            )
-        if any(left >= right for left, right in zip(node_ids, node_ids[1:])):
-            raise ValueError(
-                f"Hierarchy row {line_number} in {path.name} must list its "
-                "immutable lineage in strictly increasing node-ID order."
-            )
-
-        hierarchy_by_sample[sample_id] = (
-            frozenset(str(node_id) for node_id in node_ids)
-        )
-        seen_nodes.update(node_ids)
-        final_nodes.add(node_ids[-1])
-
-    missing_samples = (
-        [sample for sample in samples if sample not in hierarchy_by_sample]
-    )
-    if missing_samples:
-        raise ValueError(
-            f"{path.name} is missing hierarchy row(s) for sample(s): "
-            + ", ".join(repr(sample) for sample in missing_samples)
-        )
-
-    expected_nodes = set(range(node_count))
-    if seen_nodes != expected_nodes:
-        missing_nodes = sorted(expected_nodes - seen_nodes)
-        extra_nodes = sorted(seen_nodes - expected_nodes)
-        details: list[str] = []
-        if missing_nodes:
-            details.append(f"missing node IDs {missing_nodes}")
-        if extra_nodes:
-            details.append(f"unexpected node IDs {extra_nodes}")
-        raise ValueError(
-            f"{path.name} does not represent the complete immutable tree "
-            f"0..{max_node_id}: {'; '.join(details)}."
-        )
-
-    if len(final_nodes) != sample_count:
-        raise ValueError(
-            (
-                f'{path.name} has {len(final_nodes)} distinct '
-                f'final lineage node(s), but {sample_count} '
-                f'singleton leaves are required.'
-            )
-        )
-
-    return tuple(hierarchy_by_sample[sample] for sample in samples)
-
-
 # ======================================================================
 # Block 2: Signature Parsing
 # ======================================================================
-
-
-def parse_antecedent(line: str, *, signature_number: int) -> (
-    tuple[Term, ...]
-):
-    """Parse one ``IF ... THEN:`` antecedent line.
-
-    Args:
-        line: Antecedent text emitted by Tjala.
-        signature_number: Signature number used in diagnostics.
-
-    Returns:
-        Conditions in their Tjala order.
-
-    Raises:
-        ValueError: If the antecedent is malformed, repeats a gene, uses
-            an unsupported operator, or contains a non-finite threshold.
-    """
-    stripped = line.strip()
-    prefix = "IF "
-    suffix = " THEN:"
-    if not stripped.startswith(prefix) or not stripped.endswith(suffix):
-        raise ValueError(
-            f"Signature #{signature_number} has a malformed antecedent: "
-            f"{stripped!r}."
-        )
-
-    body = stripped[len(prefix) : -len(suffix)].strip()
-    if body == "<empty>":
-        return ()
-    if not body:
-        raise ValueError((
-            f'Signature #{signature_number} has an empty '
-            f'antecedent.'
-        ))
-
-    terms: list[Term] = []
-    seen_genes: set[str] = set()
-
-    for term_number, term_text in enumerate(body.split(" AND "), start=1):
-        parts = term_text.strip().rsplit(maxsplit=2)
-        if len(parts) != 3:
-            raise ValueError(
-                f"Malformed condition {term_number} in signature "
-                f"#{signature_number}: {term_text!r}."
-            )
-
-        gene, operator, threshold_text = parts
-        gene = gene.strip()
-        if not gene:
-            raise ValueError(
-                f"Term {term_number} in signature #{signature_number} "
-                "has an empty gene name."
-            )
-
-        if operator not in _ALLOWED_OPERATORS:
-            raise ValueError(
-                f"Unsupported operator {operator!r} in signature "
-                f"#{signature_number}; expected only '<' or '>'."
-            )
-
-        try:
-            threshold = float(threshold_text)
-        except ValueError as exc:
-            raise ValueError(
-                f"Non-numeric threshold {threshold_text!r} in signature "
-                f"#{signature_number}."
-            ) from exc
-
-        if not np.isfinite(threshold):
-            raise ValueError(
-                f"Non-finite threshold {threshold_text!r} in signature "
-                f"#{signature_number}."
-            )
-
-        if gene in seen_genes:
-            raise ValueError(
-                f"Signature #{signature_number} contains more than one "
-                f"condition for gene {gene!r}."
-            )
-        seen_genes.add(gene)
-        terms.append(Term(gene, operator, threshold))
-
-    return tuple(terms)
-
-
-def _parse_cluster_section(
-    lines: list[str],
-    *,
-    signature_number: int,
-    section_name: str,
-    allow_trailing_content: bool,
-) -> list[str]:
-    """Parse one rendered cluster-coverage section.
-
-    Args:
-        lines: Physical report lines after the section heading.
-        signature_number: Signature number for diagnostics.
-        section_name: Human-readable section heading.
-        allow_trailing_content: Whether a separator ends this section.
-
-    Returns:
-        Canonical cluster IDs in their rendered order.
-
-    Raises:
-        ValueError: If lines, identifiers, or percentages are malformed.
-    """
-    clusters: list[str] = []
-    saw_none = False
-
-    for raw_line in lines:
-        stripped = raw_line.strip()
-
-        if not stripped:
-            if allow_trailing_content:
-                break
-            raise ValueError(
-                f"Unexpected blank line inside {section_name!r} for "
-                f"signature #{signature_number}."
-            )
-
-        if allow_trailing_content and stripped == "----------":
-            break
-
-        if stripped == "None":
-            if clusters or saw_none:
-                raise ValueError(
-                    f"Signature #{signature_number} has an invalid 'None' "
-                    f"entry in {section_name!r}."
-                )
-            saw_none = True
-            continue
-
-        match = _CLUSTER_COVERAGE_RE.fullmatch(stripped)
-        if match is None:
-            raise ValueError(
-                f"Malformed cluster coverage line in signature "
-                f"#{signature_number} {section_name!r}: {stripped!r}."
-            )
-
-        if saw_none:
-            raise ValueError(
-                f"Signature #{signature_number} lists a cluster after 'None' "
-                f"in {section_name!r}."
-            )
-
-        percentage = float(match.group("percentage"))
-        if not np.isfinite(percentage) or not 0.0 <= percentage <= 100.0:
-            raise ValueError(
-                f"Invalid cluster coverage percentage {percentage!r} in "
-                f"signature #{signature_number}."
-            )
-
-        cluster_id = normalize_cluster_id(match.group("cluster"))
-        if not cluster_id:
-            raise ValueError(
-                f"Signature #{signature_number} contains an empty cluster ID."
-            )
-        clusters.append(cluster_id)
-
-    return clusters
-
-
-def parse_signature_block(
-    *,
-    signature_number: int,
-    block_lines: list[str],
-) -> Signature:
-    """Parse one signature block from the Tjala report.
-
-    Args:
-        signature_number: Number from the ``Signature #N:`` header.
-        block_lines: Lines after that header up to the next signature
-            header.
-
-    Returns:
-        Parsed signature record.
-
-    Raises:
-        ValueError: If required antecedent or consequent structure is
-            missing or malformed.
-    """
-    antecedent_positions = [
-        index
-        for index, line in enumerate(block_lines)
-        if line.strip().startswith("IF ") and line.strip().endswith(" THEN:")
-    ]
-    if len(antecedent_positions) != 1:
-        raise ValueError(
-            f"Signature #{signature_number} must contain exactly one "
-            f"'IF ... THEN:' antecedent; found {len(antecedent_positions)}."
-        )
-
-    antecedent_position = antecedent_positions[0]
-    terms = parse_antecedent(
-        block_lines[antecedent_position],
-        signature_number=signature_number,
-    )
-
-    can_positions = [
-        index
-        for index, line in enumerate(block_lines)
-        if line.strip() == "Can clusters:"
-    ]
-    cannot_positions = [
-        index
-        for index, line in enumerate(block_lines)
-        if line.strip() == "Cannot clusters:"
-    ]
-    if len(can_positions) != 1 or len(cannot_positions) != 1:
-        raise ValueError(
-            f"Signature #{signature_number} must contain exactly one "
-            "'Can clusters:' section and one 'Cannot clusters:' section."
-        )
-
-    can_position = can_positions[0]
-    cannot_position = cannot_positions[0]
-    if not antecedent_position < can_position < cannot_position:
-        raise ValueError(
-            f"Signature #{signature_number} has its antecedent/cluster "
-            "sections in an unexpected order."
-        )
-
-    can_clusters = _parse_cluster_section(
-        block_lines[can_position + 1 : cannot_position],
-        signature_number=signature_number,
-        section_name="Can clusters",
-        allow_trailing_content=False,
-    )
-    cannot_clusters = _parse_cluster_section(
-        block_lines[cannot_position + 1 :],
-        signature_number=signature_number,
-        section_name="Cannot clusters",
-        allow_trailing_content=True,
-    )
-
-    cluster_ids = can_clusters + cannot_clusters
-    seen_clusters: set[str] = set()
-    duplicate_clusters: set[str] = set()
-    for cluster_id in cluster_ids:
-        if cluster_id in seen_clusters:
-            duplicate_clusters.add(cluster_id)
-        else:
-            seen_clusters.add(cluster_id)
-
-    if duplicate_clusters:
-        raise ValueError(
-            f"Signature #{signature_number} contains duplicate cluster IDs: "
-            f"{sorted(duplicate_clusters)}."
-        )
-
-    return Signature(
-        number=signature_number,
-        terms=terms,
-        cluster_ids=tuple(cluster_ids),
-    )
-
-
-def load_signatures(path: Path) -> list[Signature]:
-    """Parse all signatures from the current Tjala output format.
-
-    Args:
-        path: ``tjala_output.txt`` path.
-
-    Returns:
-        Signatures in numeric order.
-
-    Raises:
-        ValueError: If the file is malformed, contains no signatures, or
-            uses non-contiguous/duplicate signature numbers.
-    """
-    lines = _read_utf8_lines(path)
-
-    headers: list[tuple[int, int]] = []
-    for line_index, line in enumerate(lines):
-        match = _SIGNATURE_HEADER_RE.fullmatch(line.strip())
-        if match is not None:
-            headers.append((line_index, int(match.group(1))))
-
-    if not headers:
-        raise ValueError(f"No signatures were found in {path.name}.")
-
-    numbers = [number for _, number in headers]
-    expected_numbers = list(range(1, len(numbers) + 1))
-    if numbers != expected_numbers:
-        raise ValueError(
-            f"Unexpected signature numbering in {path.name}: found {numbers}, "
-            f"expected {expected_numbers}."
-        )
-
-    signatures: list[Signature] = []
-    for header_offset, (start_index, signature_number) in enumerate(headers):
-        end_index = (
-            headers[header_offset + 1][0]
-            if header_offset + 1 < len(headers)
-            else len(lines)
-        )
-        signatures.append(
-            parse_signature_block(
-                signature_number=signature_number,
-                block_lines=lines[start_index + 1 : end_index],
-            )
-        )
-
-    return signatures
 
 
 def prompt_for_signature(signatures: list[Signature]) -> Signature | None:
@@ -937,7 +221,7 @@ def validate_signature_cluster_ids(
     Raises:
         ValueError: If a reported cluster is not in ``0..2N-2``.
     """
-    max_node_id = _tree_node_count(sample_count) - 1
+    max_node_id = tree_node_count(sample_count) - 1
     invalid: list[str] = []
     for cluster_id in signature.cluster_ids:
         node_id = int(cluster_id)
@@ -1099,66 +383,6 @@ def order_covered_samples(
 # ======================================================================
 
 
-def _existing_regular_file_mode(path: Path) -> int | None:
-    """Return POSIX permission bits for an existing regular file.
-
-    Symlinks are deliberately not followed because the final output
-    operation must replace the symlink itself rather than its target.
-
-    Args:
-        path: Final output pathname.
-
-    Returns:
-        Existing POSIX permission bits, or ``None`` when they should not
-        be preserved.
-    """
-    if os.name != "posix":
-        return None
-
-    try:
-        metadata = path.lstat()
-    except FileNotFoundError:
-        return None
-
-    if not stat.S_ISREG(metadata.st_mode):
-        return None
-    return stat.S_IMODE(metadata.st_mode)
-
-
-def _create_atomic_temp_file(output_path: Path) -> tuple[Path, TextIO]:
-    """Create an exclusive temporary file beside the output.
-
-    The exclusive ``x`` open prevents races. Keeping the handle open
-    until the content is fully written also prevents another process
-    from substituting a different filesystem object between creation and
-    writing.
-
-    Args:
-        output_path: Final output pathname.
-
-    Returns:
-        Temporary pathname and its open text stream.
-
-    Raises:
-        FileExistsError: If unique-name creation repeatedly collides.
-        OSError: If the temporary file cannot otherwise be created.
-    """
-    output_dir = output_path.parent
-    for _ in range(100):
-        candidate = output_dir / (
-            f".{output_path.name}.{secrets.token_hex(16)}.tmp"
-        )
-        try:
-            stream = candidate.open("x", encoding="utf-8", newline="\n")
-        except FileExistsError:
-            continue
-        return candidate, stream
-
-    raise FileExistsError(
-        f"Could not create a unique temporary file in {output_dir}."
-    )
-
-
 def write_results_atomically(
     output_path: Path,
     *,
@@ -1167,56 +391,20 @@ def write_results_atomically(
 ) -> None:
     """Write the sample list using atomic file replacement.
 
-    The final pathname is never resolved through a symlink. An existing
-    regular file keeps its POSIX permission bits; a new file uses the
-    platform's normal file-creation permissions.
-
     Args:
         output_path: Final ``signature_N.txt`` destination.
         signature_number: Selected signature number.
         ordered_samples: Covered sample identifiers in final order.
 
     Raises:
-        OSError: If writing, synchronization, permission adjustment, or
-            replacement fails.
+        OSError: If writing or replacement fails.
     """
-    output_path = output_path.absolute()
-    output_dir = output_path.parent
-    if not output_dir.is_dir():
-        raise FileNotFoundError(
-            f"Output directory does not exist: {output_dir}")
-
     lines = [
         f"Signature #{signature_number}",
         "Samples that satisfy the signature:",
         *ordered_samples,
     ]
-    content = "\n".join(lines) + "\n"
-
-    existing_mode = _existing_regular_file_mode(output_path)
-    temporary_path: Path | None = None
-    try:
-        temporary_path, temporary_file = _create_atomic_temp_file(output_path)
-        with temporary_file:
-            if existing_mode is not None:
-                os.chmod(temporary_path, existing_mode)
-            temporary_file.write(content)
-            temporary_file.flush()
-            os.fsync(temporary_file.fileno())
-
-        os.replace(temporary_path, output_path)
-        temporary_path = None
-    finally:
-        if temporary_path is not None:
-            try:
-                temporary_path.unlink()
-            except FileNotFoundError:
-                pass
-
-
-# ======================================================================
-# Block 5: Interactive Execution
-# ======================================================================
+    write_text_atomically(output_path, "\n".join(lines) + "\n")
 
 
 def run(base_path: Path) -> Path | None:
@@ -1237,13 +425,15 @@ def run(base_path: Path) -> Path | None:
     paths = ensure_required_files(base_path)
     verify_artifacts(paths.values())
 
-    signatures = load_signatures(paths["tjala_output"])
+    signatures = list(read_signature_report(paths["tjala_output"]).signatures)
+    if not signatures:
+        raise ValueError(f"No signatures were found in {TJALA_OUTPUT_FILE}.")
     selected_signature = prompt_for_signature(signatures)
     if selected_signature is None:
         return None
 
-    genes = load_identifier_file(paths["genes"], label="gene name")
-    samples = load_identifier_file(paths["columns"], label="sample ID")
+    genes = read_identifiers(paths["genes"], label="gene name")
+    samples = read_identifiers(paths["columns"], label="sample ID")
 
     gene_to_index = {gene: index for index, gene in enumerate(genes)}
     validate_signature_genes(
@@ -1255,15 +445,24 @@ def run(base_path: Path) -> Path | None:
         gene_to_index[condition.gene]
         for condition in selected_signature.terms
     )
-    values_by_gene_index = load_expression_values(
-        paths["values"],
-        expected_genes=len(genes),
-        expected_samples=len(samples),
-        required_gene_indices=required_gene_indices,
-    )
-    hierarchy_rows = load_sample_lineages(
-        paths["hierarchy"],
-        samples=samples,
+    # Every row is checked; only the rows the signature tests are kept.
+    values_by_gene_index: dict[int, FloatVector] = {}
+    row_count = 0
+    for index, row in iter_matrix_rows(paths["values"], len(samples)):
+        row_count = index + 1
+        if index in required_gene_indices:
+            values_by_gene_index[index] = row.astype(np.float64)
+    if row_count != len(genes):
+        raise ValueError(
+            f"Row-count mismatch: {MATRIX_VALUES_FILE} has {row_count} "
+            f"row(s), but {MATRIX_GENES_FILE} has {len(genes)} gene(s).")
+    # The lineages must be the ones the history implies (task 2.9).
+    history, _ = load_tree_states(base_path / TREE_STATES_FILE)
+    lineages = read_sample_lineages(paths["hierarchy"], samples,
+                                    history=history)
+    hierarchy_rows = tuple(
+        frozenset(str(node) for node in lineages[sample])
+        for sample in samples
     )
     validate_signature_cluster_ids(
         selected_signature,

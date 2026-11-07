@@ -25,64 +25,67 @@ Requires Python 3.10 or newer.
 from __future__ import annotations
 
 import argparse
-import csv
 import hashlib
-import io
 import json
 import logging
-import math
-import ntpath
 import os
-import re
 import shutil
-import subprocess
 import sys
 import tempfile
-import unicodedata
-from collections.abc import Iterator
-from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Iterable, TypedDict, cast
+from typing import Iterable, TypedDict, cast
 
 import numpy as np
 import pandas as pd
 
+from pipeline_formats import (
+    INT32_INFO,
+    SampleLineages,
+    load_tree_states,
+    read_sample_expression,
+    read_term_variances,
+    render_sample_lineages,
+    sample_id,
+    tree_node_count,
+    write_matrix_values,
+)
+from pipeline_io import (
+    INPUT_FILES,
+    MATRIX_GENES_FILE,
+    MATRIX_SAMPLES_FILE,
+    MATRIX_VALUES_FILE,
+    NATIVE_FILES_HEADER_FILE,
+    PREPARE_MARKER_FILE,
+    PREPARED_PROVENANCE_FILE,
+    SAMPLE_LINEAGES_FILE,
+    TERM_VARIANCES_FILE,
+    TREE_STATES_FILE,
+    TREE_TOPOLOGY_FILE,
+    invalidate_dependents,
+    is_blank,
+    provenance_path,
+    read_identifiers,
+    read_utf8_lines,
+    render_identifiers,
+    sha256_file,
+    validate_identifier,
+    verify_artifacts,
+    write_provenance,
+    write_text_atomically,
+)
+from pipeline_native import (
+    EXE_SUFFIX,
+    build_program,
+    find_compiler,
+    run_program,
+)
+
 LOGGER = logging.getLogger("compute_variances")
 
-TREE_STATES_FILE = "total_data.csv"
 VARIANCE_SOURCE_FILE = "compute_variances.cpp"
-MATRIX_GENES_FILE = "matrix_genes.txt"
-MATRIX_SAMPLES_FILE = "matrix_samples.txt"
-MATRIX_VALUES_FILE = "matrix_values.txt"
-SAMPLE_LINEAGES_FILE = "sample_lineages.txt"
-TERM_VARIANCES_FILE = "term_variances.txt"
 VARIANCE_STATE_FILE = "compute_variances_state.json"
-TREE_TOPOLOGY_FILE = "tree_splits.txt"
-SAMPLE_PATHS_FILE = "filenames.txt"
-TJALA_OUTPUT_FILE = "tjala_output.txt"
-DENDROGRAM_FILE = "dendrogram.html"
-BINARY_VECTORS_FILE = "binary_vectors.csv"
-CANNOT_LINKS_FILE = "cannot_links.txt"
-MUST_LINKS_FILE = "must_links.txt"
-NO_LINKS_FILE = "no_links.txt"
-CLUSTERING_SOURCE_FILE = "run_clustering.cpp"
-RECONSTRUCTION_SOURCE_FILE = "reconstruct_hierarchy.cpp"
-PREPARED_PROVENANCE_FILE = "prepared.provenance"
-CLUSTERING_PROVENANCE_FILE = "clustering.provenance"
-PARSED_DATA_PROVENANCE_FILE = "parsed_data.provenance"
-NATIVE_FILES_HEADER_FILE = "pipeline_files.hpp"
-PREPARE_MARKER_FILE = ".compute_variances_prepare_in_progress"
 EXECUTABLE_STEM = "compute_variances"
 STATE_SCHEMA_VERSION = 2
-
-INPUT_FILES = (
-    MATRIX_GENES_FILE, MATRIX_SAMPLES_FILE,
-    SAMPLE_LINEAGES_FILE, MATRIX_VALUES_FILE,
-)
-INT32_INFO = np.iinfo(np.int32)
-
-SampleLineages = dict[str, tuple[int, ...]]
 
 
 class BuildState(TypedDict):
@@ -145,859 +148,8 @@ class VarianceStageState(TypedDict, total=False):
 
 
 # ======================================================================
-# Block 0: Text Contracts and Artifact Provenance
-# ======================================================================
-PROVENANCE_HEADER = "TAVNIT-PROVENANCE-1"
-_CANONICAL_INT_RE = re.compile(r"(?:0|-?[1-9][0-9]*)\Z", re.ASCII)
-_DECIMAL_FLOAT_RE = re.compile(
-    r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)"
-    r"(?:[eE][+-]?[0-9]+)?\Z", re.ASCII
-)
-_STAGE_NAMES = {
-    "ingest", "configuration", "sample_manifest", "clustering",
-    "reconstruct", "prepare", "variances", "signatures", "cluster_export",
-    "signature_export", "dendrogram",
-}
-
-
-def iter_utf8_lines(path: Path) -> Iterator[str]:
-    """Yield validated physical UTF-8 records incrementally.
-
-    Args:
-        path: Nonempty machine-data text file.
-
-    Yields:
-        Literal nonblank records in physical order.
-
-    Raises:
-        ValueError: If encoding, terminators, or blank records are
-            invalid.
-        OSError: If the file cannot be read.
-    """
-    count = 0
-    with path.open("rb") as stream:
-        for count, raw in enumerate(stream, 1):
-            encoding = "utf-8-sig" if count == 1 else "utf-8"
-            try:
-                line = raw.decode(encoding, errors="strict")
-            except UnicodeError as exc:
-                raise ValueError(f"{path}:{count}: invalid UTF-8") from exc
-            if line.endswith("\n"):
-                line = line[:-1]
-                if line.endswith("\r"):
-                    line = line[:-1]
-            if "\r" in line or "\x00" in line or "\ufeff" in line:
-                raise ValueError(f"{path}:{count}: invalid text transport")
-            if not line or line.isspace():
-                raise ValueError(f"{path}:{count}: blank record")
-            yield line
-    if count == 0:
-        raise ValueError(f"{path}: empty file")
-
-
-def read_utf8_lines(
-    path: Path, *, allow_blank: bool = False, allow_empty: bool = False
-) -> list[str]:
-    """Read physical UTF-8 records without inferring missing values.
-
-    Accept one initial BOM and LF or CRLF terminators. Reject interior
-    BOMs, lone carriage returns, invalid UTF-8, and prohibited blanks.
-
-    Args:
-        path: Input text file.
-        allow_blank: Whether the schema permits blank records.
-        allow_empty: Whether a zero-record file is meaningful.
-
-    Returns:
-        Literal records with only transport terminators removed.
-
-    Raises:
-        OSError: If the file cannot be read.
-        ValueError: If encoding, terminators, or records are invalid.
-    """
-    try:
-        text = path.read_bytes().decode("utf-8-sig", errors="strict")
-    except UnicodeError as exc:
-        raise ValueError(f"{path}: invalid UTF-8") from exc
-    if "\ufeff" in text:
-        raise ValueError(f"{path}: repeated or interior UTF-8 BOM")
-    text = text.replace("\r\n", "\n")
-    if "\r" in text or "\x00" in text:
-        raise ValueError(f"{path}: invalid record terminator or NUL")
-    lines = text.split("\n")
-    if lines[-1] == "":
-        lines.pop()
-    if not lines and not allow_empty:
-        raise ValueError(f"{path}: file is empty")
-    if not allow_blank:
-        for number, line in enumerate(lines, 1):
-            if not line or line.isspace():
-                raise ValueError(f"{path}:{number}: blank record")
-    return lines
-
-
-def validate_identifier(value: str, *, source: str) -> None:
-    """Validate a literal identifier without normalization.
-
-    Args:
-        value: Case-sensitive identifier after ingestion normalization.
-        source: File and record location for diagnostics.
-
-    Raises:
-        ValueError: If the identifier is empty or has
-            whitespace/control.
-    """
-    if not value or any(
-        char.isspace() or unicodedata.category(char) == "Cc"
-        or char == "\ufeff" for char in value
-    ):
-        raise ValueError(f"{source}: invalid identifier {value!r}")
-
-
-def parse_canonical_int(token: str, *, source: str) -> int:
-    """Parse one canonical ASCII decimal integer without narrowing.
-
-    Args:
-        token: Literal machine-format field.
-        source: File and field location for diagnostics.
-
-    Returns:
-        Exact Python integer; callers enforce semantic range bounds.
-
-    Raises:
-        ValueError: If the spelling is not canonical ASCII decimal.
-    """
-    if _CANONICAL_INT_RE.fullmatch(token) is None:
-        raise ValueError(f"{source}: noncanonical integer {token!r}")
-    return int(token, 10)
-
-
-def parse_decimal_float(token: str, *, source: str) -> float:
-    """Parse a complete, finite decimal floating-point field.
-
-    Args:
-        token: Literal field; a leading sign and exponent are permitted.
-        source: File and field location for diagnostics.
-
-    Returns:
-        Finite floating-point value, with signed zero normalized.
-
-    Raises:
-        ValueError: If syntax, finiteness, or nonzero range is invalid.
-    """
-    if _DECIMAL_FLOAT_RE.fullmatch(token) is None:
-        raise ValueError(f"{source}: invalid floating-point field {token!r}")
-    value = float(token)
-    if not math.isfinite(value):
-        raise ValueError(f"{source}: nonfinite floating-point value")
-    if value == 0.0 and Decimal(token) != 0:
-        raise ValueError(f"{source}: nonzero value underflows to zero")
-    return 0.0 if value == 0.0 else value
-
-
-def parse_csv_record(line: str, *, source: str) -> list[str]:
-    """Decode one strictly quoted, single-line CSV record.
-
-    Args:
-        line: One physical record without its line terminator.
-        source: File and record location for diagnostics.
-
-    Returns:
-        Literal decoded fields, preserving empty and quoted contents.
-
-    Raises:
-        ValueError: If a quote is misplaced or a field is unterminated.
-    """
-    fields: list[str] = []
-    pos = 0
-    while True:
-        value: list[str] = []
-        if pos < len(line) and line[pos] == '"':
-            pos += 1
-            while True:
-                if pos >= len(line):
-                    raise ValueError(f"{source}: unterminated CSV quote")
-                char = line[pos]
-                pos += 1
-                if char == '"':
-                    if pos < len(line) and line[pos] == '"':
-                        value.append('"')
-                        pos += 1
-                    else:
-                        break
-                else:
-                    value.append(char)
-            if pos < len(line) and line[pos] != ",":
-                raise ValueError(f"{source}: content after closing CSV quote")
-        else:
-            while pos < len(line) and line[pos] != ",":
-                if line[pos] == '"':
-                    raise ValueError(f"{source}: quote inside unquoted field")
-                value.append(line[pos])
-                pos += 1
-        fields.append("".join(value))
-        if pos == len(line):
-            return fields
-        pos += 1
-
-
-def read_csv_rows(path: Path) -> list[list[str]]:
-    """Read strict single-line CSV records with literal empty fields.
-
-    Args:
-        path: CSV file using the pipeline dialect.
-
-    Returns:
-        Parsed records in physical order, including any header.
-
-    Raises:
-        OSError: If reading fails.
-        ValueError: If encoding, blank records, or CSV syntax is
-            invalid.
-    """
-    return [
-        parse_csv_record(line, source=f"{path}:{number}")
-        for number, line in enumerate(read_utf8_lines(path), 1)
-    ]
-
-
-def read_identifiers(path: Path, *, label: str) -> list[str]:
-    """Read unique literal identifiers, one per physical line.
-
-    Args:
-        path: Identifier-list file.
-        label: Identifier kind used in diagnostics.
-
-    Returns:
-        Identifiers in physical order, without CSV interpretation.
-
-    Raises:
-        ValueError: If any identifier is invalid or duplicated.
-        OSError: If reading fails.
-    """
-    values = read_utf8_lines(path)
-    seen: set[str] = set()
-    for number, value in enumerate(values, 1):
-        validate_identifier(value, source=f"{path}:{number} ({label})")
-        if value in seen:
-            raise ValueError(f"{path}:{number}: duplicate {label} {value!r}")
-        seen.add(value)
-    return values
-
-
-def prompt_input(prompt: str = "") -> str:
-    """Display an interactive prompt on stderr and read one response.
-
-    Args:
-        prompt: Prompt text; no newline is added.
-
-    Returns:
-        User response without the input line terminator.
-
-    Raises:
-        EOFError: If standard input is exhausted.
-        KeyboardInterrupt: If the user interrupts input.
-    """
-    print(prompt, end="", file=sys.stderr, flush=True)
-    return input()
-
-
-def write_text_atomically(path: Path, content: str) -> None:
-    """Flush, close, and replace one UTF-8/LF output file.
-
-    Args:
-        path: Final output path; its parent must already exist.
-        content: Complete text, already serialized for its schema.
-
-    Raises:
-        OSError: If writing, flushing, closing, or replacement fails.
-    """
-    fd, name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
-    temporary = Path(name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
-            stream.write(content)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path)
-    finally:
-        try:
-            temporary.unlink(missing_ok=True)
-        except OSError as exc:
-            print(f"Warning: temporary cleanup failed: {exc}", file=sys.stderr)
-
-
-@dataclass(frozen=True)
-class ProvenanceRecord:
-    """Verified structure of a stage-local commit manifest.
-
-    Attributes:
-        stage: Producing stage identifier.
-        producer: SHA-256 of the producer source, for traceability.
-        inputs: Absolute input paths and their exact byte hashes.
-        parents: Upstream commit manifests and their exact byte hashes.
-        outputs: Local output basenames and their exact byte hashes.
-        categories: Sample IDs mapped to absolute source-directory
-            paths.
-    """
-
-    stage: str
-    producer: str
-    inputs: dict[str, str]
-    parents: dict[str, str]
-    outputs: dict[str, str]
-    categories: dict[str, str]
-
-
-def provenance_path(path: Path) -> Path:
-    """Return the commit-manifest path owning one generated artifact.
-
-    Args:
-        path: Generated artifact path.
-
-    Returns:
-        Expected stage-local provenance path.
-    """
-    if path.name in INPUT_FILES:
-        return path.with_name(PREPARED_PROVENANCE_FILE)
-    if path.name in {SAMPLE_PATHS_FILE, TREE_TOPOLOGY_FILE} or re.fullmatch(
-        r"iter[1-9][0-9]*\.txt", path.name
-    ):
-        return path.with_name(CLUSTERING_PROVENANCE_FILE)
-    if path.suffix == ".csv" and path.parent.name.endswith("_parsed_data"):
-        return path.with_name(PARSED_DATA_PROVENANCE_FILE)
-    return path.with_name(path.name + ".provenance")
-
-
-def _decode_provenance_field(token: str, *, source: str) -> str:
-    """Decode one canonical hexadecimal UTF-8 provenance field.
-
-    Args:
-        token: Lowercase hexadecimal byte pairs, without separators.
-        source: Manifest and record location for diagnostics.
-
-    Returns:
-        Decoded literal text.
-
-    Raises:
-        ValueError: If hexadecimal, UTF-8, or path transport is invalid.
-    """
-    if re.fullmatch(r"(?:[0-9a-f]{2})*", token) is None:
-        raise ValueError(f"{source}: noncanonical hexadecimal field")
-    try:
-        value = bytes.fromhex(token).decode("utf-8", errors="strict")
-    except UnicodeError as exc:
-        raise ValueError(f"{source}: invalid encoded UTF-8") from exc
-    if any(char in value for char in ("\x00", "\r", "\n", "\ufeff")):
-        raise ValueError(f"{source}: invalid encoded text transport")
-    return value
-
-
-def read_provenance(path: Path) -> ProvenanceRecord:
-    """Read and validate the structure of a commit manifest.
-
-    Args:
-        path: Provenance file in the producer's output directory.
-
-    Returns:
-        Parsed manifest with validated paths and record fields.
-
-    Raises:
-        ValueError: If records, hashes, or output basenames are
-            malformed.
-        OSError: If the manifest cannot be read.
-    """
-    lines = read_utf8_lines(path)
-    if len(lines) < 4 or lines[0] != PROVENANCE_HEADER:
-        raise ValueError(f"{path}: invalid provenance header")
-    if not lines[1].startswith("stage\t") or lines[1][6:] not in _STAGE_NAMES:
-        raise ValueError(f"{path}: invalid provenance stage")
-    if not lines[2].startswith("producer\t"):
-        raise ValueError(f"{path}: missing producer fingerprint")
-    producer = lines[2][9:]
-    if re.fullmatch(r"[0-9a-f]{64}", producer) is None:
-        raise ValueError(f"{path}: invalid producer fingerprint")
-    maps: dict[str, dict[str, str]] = {k: {} for k in ("I", "P", "O", "C")}
-    for number, line in enumerate(lines[3:], 4):
-        fields = line.split("\t")
-        if len(fields) != 3 or fields[0] not in maps:
-            raise ValueError(f"{path}:{number}: invalid provenance record")
-        kind, digest, encoded = fields
-        value = _decode_provenance_field(
-            encoded, source=f"{path}:{number}"
-        )
-        if kind == "C":
-            key = _decode_provenance_field(
-                digest, source=f"{path}:{number}"
-            )
-            validate_identifier(key, source=f"{path}:{number}")
-            if not Path(value).is_absolute():
-                raise ValueError(f"{path}:{number}: relative category path")
-            if key in maps[kind]:
-                raise ValueError(f"{path}:{number}: duplicate category ID")
-            maps[kind][key] = value
-            continue
-        if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
-            raise ValueError(f"{path}:{number}: invalid SHA-256")
-        if not value or "\x00" in value or "\n" in value or "\r" in value:
-            raise ValueError(f"{path}:{number}: invalid path")
-        if kind in {"I", "P"} and not Path(value).is_absolute():
-            raise ValueError(f"{path}:{number}: relative dependency path")
-        if kind == "O" and (
-            Path(value).name != value or "/" in value or "\\" in value
-            or value in {".", ".."}
-        ):
-            raise ValueError(f"{path}:{number}: output must be a basename")
-        if value in maps[kind]:
-            raise ValueError(f"{path}:{number}: duplicate provenance path")
-        maps[kind][value] = digest
-    if not maps["O"]:
-        raise ValueError(f"{path}: provenance has no outputs")
-    return ProvenanceRecord(
-        lines[1][6:], producer, maps["I"], maps["P"], maps["O"], maps["C"]
-    )
-
-
-def verify_provenance(
-    path: Path, *, _verified: dict[Path, ProvenanceRecord] | None = None,
-    _visiting: set[Path] | None = None,
-) -> ProvenanceRecord:
-    """Verify committed bytes and upstream dependency hashes.
-
-    Args:
-        path: Commit manifest to verify before consuming its outputs.
-        _verified: Internal cache for manifests already checked this
-            call.
-        _visiting: Internal cycle-detection set.
-
-    Returns:
-        Validated provenance record.
-
-    Raises:
-        ValueError: If a dependency is changed, incomplete, or cyclic.
-        OSError: If an input or commit manifest is missing/unreadable.
-    """
-    path = path.resolve()
-    verified = {} if _verified is None else _verified
-    visiting = set() if _visiting is None else _visiting
-    if path in verified:
-        return verified[path]
-    record = read_provenance(path)
-    if path in visiting:
-        raise ValueError(f"{path}: cyclic artifact provenance")
-    visiting.add(path)
-    for raw, expected in record.parents.items():
-        parent = Path(raw)
-        if sha256_file(parent) != expected:
-            raise ValueError(f"{path}: changed upstream commit {parent}")
-        verify_provenance(parent, _verified=verified, _visiting=visiting)
-    pairs = list(record.inputs.items()) + [
-        (str(path.parent / name), digest)
-        for name, digest in record.outputs.items()
-    ]
-    for raw, expected in pairs:
-        if sha256_file(Path(raw)) != expected:
-            raise ValueError(f"{path}: changed artifact {raw}; rerun producer")
-    visiting.remove(path)
-    verified[path] = record
-    return record
-
-
-def verify_artifacts(paths: Iterable[Path]) -> None:
-    """Verify provenance for every required generated input.
-
-    Args:
-        paths: Generated artifacts required by a stage.
-
-    Raises:
-        OSError: If any artifact or its provenance is unavailable.
-        ValueError: If provenance or dependency hashes do not match.
-    """
-    verified: dict[Path, ProvenanceRecord] = {}
-    for path in paths:
-        path = Path(path).resolve()
-        owner = provenance_path(path)
-        if owner.name == PREPARED_PROVENANCE_FILE and (
-            path.parent / PREPARE_MARKER_FILE
-        ).exists():
-            raise ValueError(f"{path.parent}: interrupted prepare stage")
-        record = verify_provenance(owner, _verified=verified)
-        if path.name not in record.outputs:
-            raise ValueError(f"{owner}: does not own required {path.name}")
-
-
-def render_provenance(
-    path: Path, *, stage: str, outputs: Iterable[Path],
-    inputs: Iterable[Path] = (), parents: Iterable[Path] = (),
-    categories: dict[str, str] | None = None,
-    producer: Path | None = None,
-) -> str:
-    """Return the record that ``write_provenance`` would write.
-
-    Args:
-        path: Stage-local manifest destination.
-        stage: Recognized producing-stage name.
-        outputs: Complete owned output set, all beside the manifest.
-        inputs: Explicit input files; raw external data need no parent.
-        parents: Verified upstream manifests for generated inputs.
-        categories: Optional sample-to-source-folder mapping for
-            plotting.
-        producer: Producing source file; defaults to this module.
-
-    Returns:
-        The record's text.
-
-    Raises:
-        OSError: If hashing fails.
-        ValueError: If stage, ownership, or dependency validation fails.
-    """
-    if stage not in _STAGE_NAMES:
-        raise ValueError(f"Unknown provenance stage: {stage}")
-    path = path.resolve()
-    producer = Path(__file__) if producer is None else producer
-    lines = [PROVENANCE_HEADER, f"stage\t{stage}",
-             f"producer\t{sha256_file(producer)}"]
-    for kind, objects in (("I", inputs), ("P", parents), ("O", outputs)):
-        unique = sorted({Path(obj).resolve() for obj in objects}, key=str)
-        for item in unique:
-            if kind == "P":
-                verify_provenance(item)
-            if kind == "O" and item.parent != path.parent:
-                raise ValueError(f"{item}: output is outside manifest folder")
-            name = item.name if kind == "O" else str(item)
-            lines.append(
-                f"{kind}\t{sha256_file(item)}\t{name.encode('utf-8').hex()}"
-            )
-    for sid, folder in sorted((categories or {}).items()):
-        lines.append(
-            f"C\t{sid.encode('utf-8').hex()}\t{folder.encode('utf-8').hex()}"
-        )
-    return "\n".join(lines) + "\n"
-
-
-def write_provenance(
-    path: Path, *, stage: str, outputs: Iterable[Path],
-    inputs: Iterable[Path] = (), parents: Iterable[Path] = (),
-    categories: dict[str, str] | None = None,
-    producer: Path | None = None,
-) -> None:
-    """Commit stage output hashes and their dependencies.
-
-    Call only after successful semantic validation and output
-    publication. The stage is uncommitted while this record is missing
-    or mismatched.
-
-    Args:
-        path: Stage-local manifest destination.
-        stage: Recognized producing-stage name.
-        outputs: Complete owned output set, all beside the manifest.
-        inputs: Explicit input files; raw external data need no parent.
-        parents: Verified upstream manifests for generated inputs.
-        categories: Optional sample-to-source-folder mapping for
-            plotting.
-        producer: Producing source file; defaults to this module.
-
-    Raises:
-        OSError: If hashing or publication fails.
-        ValueError: If stage, ownership, or dependency validation fails.
-    """
-    record = render_provenance(
-        path, stage=stage, outputs=outputs, inputs=inputs,
-        parents=parents, categories=categories, producer=producer,
-    )
-    write_text_atomically(path.resolve(), record)
-
-
-def publication_unchanged(
-    manifest: Path, contents: dict[Path, str], **record: Any
-) -> bool:
-    """Tell whether publishing ``contents`` would change nothing.
-
-    An identical result must not be rewritten or invalidate anything
-    downstream. That holds when every output already holds exactly the
-    new text and the manifest already holds exactly the record that
-    would be written for it.
-
-    Args:
-        manifest: The outputs' provenance record.
-        contents: New text by output path.
-        **record: The other ``write_provenance`` arguments, without
-            ``outputs``.
-
-    Returns:
-        True when the outputs and their record are already current.
-    """
-    try:
-        for path, text in contents.items():
-            if Path(path).read_bytes() != text.encode("utf-8"):
-                return False
-        current = Path(manifest).read_text(encoding="utf-8")
-        return current == render_provenance(
-            manifest, outputs=list(contents), **record)
-    except (OSError, ValueError):
-        return False
-
-
-def invalidate_dependents(
-    changed: Iterable[Path], directories: Iterable[Path]
-) -> None:
-    """Invalidate manifest-owned downstream outputs.
-
-    The supplied directories are inspected nonrecursively. Input files,
-    unknown manifests, and unrelated files are never cleanup targets.
-
-    Args:
-        changed: Artifacts about to change or already invalidated.
-        directories: Existing result directories and their workflow
-            parent.
-
-    Raises:
-        OSError: If a recognized downstream output cannot be
-            invalidated.
-        ValueError: If a recognized manifest contains unsafe ownership.
-    """
-    changed_paths = {Path(item).resolve() for item in changed}
-    candidates: dict[Path, ProvenanceRecord] = {}
-    for directory in {Path(item).resolve() for item in directories}:
-        if not directory.is_dir():
-            continue
-        for candidate in directory.glob("*.provenance"):
-            if candidate.is_symlink():
-                continue
-            try:
-                record = read_provenance(candidate)
-            except (OSError, ValueError):
-                continue
-            candidates[candidate] = record
-    # A changed member also changes the identity of its owning commit.
-    for manifest, record in candidates.items():
-        owned = {(manifest.parent / name).resolve()
-                 for name in record.outputs}
-        if owned.intersection(changed_paths):
-            changed_paths.add(manifest.resolve())
-    while True:
-        removed: list[Path] = []
-        for manifest, record in candidates.items():
-            dependencies = {
-                Path(raw).resolve()
-                for raw in (*record.inputs, *record.parents)
-            }
-            if not dependencies.intersection(changed_paths):
-                continue
-            manifest.unlink(missing_ok=True)
-            changed_paths.add(manifest.resolve())
-            for name in record.outputs:
-                output = manifest.parent / name
-                # unlink removes a symbolic link itself, not its target.
-                output.unlink(missing_ok=True)
-                changed_paths.add(output.resolve())
-            removed.append(manifest)
-        if not removed:
-            return
-        for manifest in removed:
-            del candidates[manifest]
-
-
-@dataclass(frozen=True)
-class TreeSplit:
-    """One immutable binary-tree split.
-
-    Attributes:
-        iteration: One-based global split number.
-        parent: Retired immutable parent ID.
-        retained_child: Fresh retained-child ID.
-        extracted_child: Fresh extracted-child ID.
-    """
-
-    iteration: int
-    parent: int
-    retained_child: int
-    extracted_child: int
-
-
-@dataclass(frozen=True)
-class TreeTopology:
-    """A validated immutable topology shared by pipeline consumers.
-
-    Attributes:
-        root: Permanent root ID, always zero.
-        splits: Splits in global iteration order.
-        children: Parent IDs mapped to retained/extracted children.
-        parent_by_node: Child IDs mapped to their immediate parent.
-        creation_split: Split creating each node; root maps to zero.
-        leaves: Terminal immutable IDs in numeric order.
-        node_count: Total immutable node count.
-    """
-
-    root: int
-    splits: tuple[TreeSplit, ...]
-    children: dict[int, tuple[int, int]]
-    parent_by_node: dict[int, int]
-    creation_split: dict[int, int]
-    leaves: tuple[int, ...]
-    node_count: int
-
-
-def read_tree_topology(path: Path, sample_count: int) -> TreeTopology:
-    """Parse canonical topology records and validate every split.
-
-    Args:
-        path: Authoritative ``tree_splits.txt`` file.
-        sample_count: Number of samples and terminal leaves.
-
-    Returns:
-        Complete topology with one root and two fresh children per
-        split.
-
-    Raises:
-        ValueError: If syntax, allocation, or active-node invariants
-            fail.
-        OSError: If reading fails.
-    """
-    node_count = _tree_node_count(sample_count)
-    lines = read_utf8_lines(path)
-    if len(lines) != sample_count or lines[0].split() != ["root", "0"]:
-        raise ValueError(f"{path}: expected root 0 and N-1 split records")
-    active = {0}
-    children: dict[int, tuple[int, int]] = {}
-    parents: dict[int, int] = {}
-    creation = {0: 0}
-    splits: list[TreeSplit] = []
-    for iteration, line in enumerate(lines[1:], 1):
-        fields = line.split()
-        if len(fields) != 5 or fields[0] != "split":
-            raise ValueError(f"{path}:{iteration + 1}: invalid split record")
-        number, parent, left, right = [
-            parse_canonical_int(token, source=f"{path}:{iteration + 1}")
-            for token in fields[1:]
-        ]
-        if number != iteration or (left, right) != (
-            2 * iteration - 1, 2 * iteration
-        ) or parent not in active:
-            raise ValueError(
-                f"{path}:{iteration + 1}: invalid immutable split")
-        active.remove(parent)
-        active.update((left, right))
-        children[parent] = (left, right)
-        parents[left] = parents[right] = parent
-        creation[left] = creation[right] = iteration
-        splits.append(TreeSplit(iteration, parent, left, right))
-    return TreeTopology(
-        0, tuple(splits), children, parents, creation,
-        tuple(sorted(active)), node_count
-    )
-
-
-def read_tree_states(path: Path) -> pd.DataFrame:
-    """Decode strict, compressed immutable hierarchy history.
-
-    Args:
-        path: Headerless ``total_data.csv`` file.
-
-    Returns:
-        Paths followed by N integer state columns, with string labels.
-
-    Raises:
-        ValueError: If dimensions, paths, blanks, or node fields are
-            invalid.
-        OSError: If reading fails.
-    """
-    rows = read_csv_rows(path)
-    count = len(rows)
-    node_count = _tree_node_count(count)
-    states = np.empty((count, count), dtype=np.int64)
-    paths: list[str] = []
-    ids: set[str] = set()
-    for row_index, row in enumerate(rows):
-        if len(row) != count + 1 or not row[0]:
-            raise ValueError((
-                f'{path}:{row_index + 1}: expected path and N '
-                f'states'
-            ))
-        sid = sample_id(row[0])
-        validate_identifier(sid, source=f"{path}:{row_index + 1}")
-        if sid in ids:
-            raise ValueError((
-                f'{path}:{row_index + 1}: duplicate sample ID '
-                f'{sid!r}'
-            ))
-        ids.add(sid)
-        paths.append(row[0])
-        for column, token in enumerate(row[1:]):
-            if token == "" and row_index:
-                value = int(states[row_index - 1, column])
-            else:
-                value = parse_canonical_int(
-                    token, source=f"{path}:{row_index + 1}:{column + 2}"
-                )
-            if not 0 <= value < node_count:
-                raise ValueError(
-                    f"{path}:{row_index + 1}:{column + 2}: bad node ID")
-            states[row_index, column] = value
-    if not np.all(states[:, 0] == 0):
-        raise ValueError(f"{path}: state 0 must contain root 0")
-    if set(np.unique(states)) != set(range(node_count)):
-        raise ValueError(f"{path}: history omits immutable nodes")
-    if len(set(states[:, -1])) != count:
-        raise ValueError(f"{path}: terminal sample leaves must be distinct")
-    data = pd.DataFrame(states, columns=[str(i) for i in range(1, count + 1)])
-    data.insert(0, "0", paths)
-    return data
-
-
-def validate_tree_states(data: pd.DataFrame, topology: TreeTopology) -> None:
-    """Cross-check every sample transition against authoritative.
-
-    Cross-check every sample transition against the authoritative tree.
-
-    Args:
-        data: Decoded path-plus-state table in sample order.
-        topology: Tree topology for the same samples.
-
-    Raises:
-        ValueError: If dimensions or any split transition disagree.
-    """
-    states = data.iloc[:, 1:].to_numpy(dtype=np.int64)
-    count = len(data)
-    if states.shape != (count, count) or topology.node_count != 2 * count - 1:
-        raise ValueError("History and topology dimensions disagree")
-    if not np.all(states[:, 0] == 0):
-        raise ValueError("History state 0 must contain root 0")
-    for split in topology.splits:
-        previous = states[:, split.iteration - 1]
-        current = states[:, split.iteration]
-        mask = previous == split.parent
-        if not mask.any() or np.any(current[~mask] != previous[~mask]):
-            raise ValueError((
-                f'History changes wrong samples at split '
-                f'{split.iteration}'
-            ))
-        if set(current[mask]) != {split.retained_child, split.extracted_child}:
-            raise ValueError((
-                f'History has wrong children at split '
-                f'{split.iteration}'
-            ))
-    if set(states[:, -1]) != set(topology.leaves):
-        raise ValueError("History terminal nodes disagree with topology")
-
-
-# ======================================================================
 # Block 1: Small Utilities
 # ======================================================================
-def sample_id(raw_path: str) -> str:
-    """Derive a sample identifier from a manifest path.
-
-    Manifest paths may use Windows separators even when the script runs
-    on POSIX, so ``ntpath.basename`` is used unconditionally.
-
-    Args:
-        raw_path: Path string stored in the manifest.
-
-    Returns:
-        The final path component, interpreted with Windows path
-        semantics.
-    """
-    return ntpath.basename(raw_path)
 
 
 def validate_name(name: str, *, what: str, source: str) -> None:
@@ -1043,40 +195,6 @@ def resolve_sample_path(raw_path: str, data_dir: Path) -> Path:
         f"Could not locate sample file for manifest entry {raw_path!r}: "
         f"tried {literal} and {candidate}"
     )
-
-
-# Digests already computed by this process, keyed by resolved path and
-# checked against the file's size, modification time and file ID.
-_DIGEST_MEMO: dict[str, tuple[tuple[int, int, int, int], str]] = {}
-
-
-def sha256_file(path: Path) -> str:
-    """Return the hexadecimal SHA-256 digest of a file.
-
-    A file whose size, modification time and file ID are unchanged
-    since this process last hashed it is not read again. Replacing a
-    file, as every atomic write does, gives it a new file ID.
-
-    Args:
-        path: File to hash.
-
-    Returns:
-        Lowercase hexadecimal SHA-256 digest.
-    """
-    path = Path(path)
-    status = path.stat()
-    identity = (status.st_size, status.st_mtime_ns, status.st_ino,
-                status.st_dev)
-    key = str(path.resolve())
-    known = _DIGEST_MEMO.get(key)
-    if known is not None and known[0] == identity:
-        return known[1]
-    digest = hashlib.sha256()
-    with path.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-            digest.update(chunk)
-    _DIGEST_MEMO[key] = (identity, digest.hexdigest())
-    return digest.hexdigest()
 
 
 def input_hashes(directory: Path) -> dict[str, str]:
@@ -1253,24 +371,7 @@ def write_state_atomically(out_dir: Path, state: VarianceStageState) -> None:
     state_to_write: dict[str, object] = dict(state)
     state_to_write["schema_version"] = STATE_SCHEMA_VERSION
     payload = json.dumps(state_to_write, indent=2, sort_keys=True) + "\n"
-
-    fd, temporary_name = tempfile.mkstemp(
-        dir=out_dir,
-        prefix=f".{VARIANCE_STATE_FILE}.",
-        suffix=".tmp",
-        text=True,
-    )
-    temporary_path = Path(temporary_name)
-
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
-            fh.write(payload)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(temporary_path, out_dir / VARIANCE_STATE_FILE)
-    except Exception:
-        temporary_path.unlink(missing_ok=True)
-        raise
+    write_text_atomically(out_dir / VARIANCE_STATE_FILE, payload)
 
 
 def invalidate_variance(
@@ -1300,9 +401,9 @@ def load_gene_filter(path: str | None) -> set[str] | None:
 
     ``None`` means no filtering, while an empty set means a supplied
     filter file contained no usable gene names. UTF-8 BOMs are accepted,
-    matching the CSV readers. Blank or whitespace-only lines are
-    ignored; whitespace inside an actual gene name is rejected rather
-    than silently stripped.
+    matching the CSV readers. Blank lines (empty, or only ASCII spaces
+    and tabs) are ignored; any other whitespace in a line is rejected
+    rather than silently stripped.
 
     Args:
         path: Allowlist path, or ``None`` for no filter.
@@ -1321,7 +422,7 @@ def load_gene_filter(path: str | None) -> set[str] | None:
     for line_number, gene in enumerate(
         read_utf8_lines(Path(path), allow_blank=True, allow_empty=True), 1
     ):
-        if not gene or gene.isspace():
+        if is_blank(gene):
             continue
         validate_name(gene, what="gene name", source=f"{path}:{line_number}")
         genes.add(gene)
@@ -1329,135 +430,9 @@ def load_gene_filter(path: str | None) -> set[str] | None:
     return genes
 
 
-def _parse_hierarchy_id(
-    value: object, *, row_number: int, column_number: int
-) -> int:
-    """Parse a canonical nonnegative hierarchy-state identifier.
-
-    Args:
-        value: Decoded field, without automatic normalization.
-        row_number: One-based physical record.
-        column_number: One-based physical field position.
-
-    Returns:
-        Exact nonnegative node ID.
-
-    Raises:
-        ValueError: If spelling or sign violates the state schema.
-    """
-    node_id = parse_canonical_int(
-        str(value), source=f"total_data.csv:{row_number}:{column_number}"
-    )
-    if node_id < 0:
-        raise ValueError("SampleLineages node IDs must be nonnegative")
-    return node_id
-
-
-def _tree_node_count(sample_count: int) -> int:
-    """Return number of nodes in a full binary tree with N leaves.
-
-    Return the number of nodes in a full binary tree with N leaves.
-
-    Args:
-        sample_count: Number of samples/leaves in the clustering tree.
-
-    Returns:
-        ``2 * sample_count - 1`` for a non-empty tree.
-
-    Raises:
-        ValueError: If ``sample_count`` is not positive or the largest
-            node ID cannot be represented by the signed 32-bit
-            downstream contract.
-    """
-    if sample_count <= 0:
-        raise ValueError("sample_count must be positive")
-
-    node_count = 2 * sample_count - 1
-    max_node_id = node_count - 1
-    if max_node_id > int(INT32_INFO.max):
-        raise ValueError(
-            (
-                f'A fully immutable tree for {sample_count} '
-                f'samples requires node ID {max_node_id}, '
-                f'exceeding the signed 32-bit hierarchy contract'
-            )
-        )
-    return node_count
-
-
-def load_tree_states(
-    tree_states_path: Path,
-) -> tuple[SampleLineages, list[str]]:
-    """Load and validate sample memberships in the immutable tree.
-
-    ``reconstruct_hierarchy.cpp`` writes one path and N compressed state
-    columns for N samples. Only empty fields repeat the preceding value.
-    Validate every transition against the accompanying tree topology.
-
-    Args:
-        tree_states_path: Headerless ``total_data.csv`` history path.
-
-    Returns:
-        Sample-ID-to-lineage mapping and paths in history row order.
-
-    Raises:
-        ValueError: If history, identities, or topology are
-            inconsistent.
-        OSError: If either input cannot be read.
-    """
-    data = read_tree_states(tree_states_path)
-    topology = read_tree_topology(
-        tree_states_path.with_name(TREE_TOPOLOGY_FILE), len(data)
-    )
-    validate_tree_states(data, topology)
-    hierarchy: SampleLineages = {}
-    raw_paths: list[str] = []
-    for row in data.itertuples(index=False, name=None):
-        raw = str(row[0])
-        hierarchy[sample_id(raw)] = (
-            tuple(dict.fromkeys(int(x) for x in row[1:]))
-        )
-        raw_paths.append(raw)
-    return hierarchy, raw_paths
-
-
 # ======================================================================
 # Block 3: Expression Matrix
 # ======================================================================
-def _read_sample_expression(resolved: Path, sid: str) -> pd.Series:
-    """Read one per-sample CSV using the strict pipeline dialect.
-
-    Args:
-        resolved: Existing CSV path.
-        sid: Sample ID assigned at ingestion and validated globally.
-
-    Returns:
-        Binary64 values indexed by literal, unique gene identifiers.
-
-    Raises:
-        ValueError: If headers, fields, names, or expressions are
-            invalid.
-        OSError: If the file cannot be read.
-    """
-    rows = read_csv_rows(resolved)
-    if rows[0] != ["gene", "expression"] or len(rows) < 2:
-        raise ValueError(f"{resolved}: expected gene,expression and data rows")
-    genes: list[str] = []
-    values: list[float] = []
-    seen: set[str] = set()
-    for number, row in enumerate(rows[1:], 2):
-        if len(row) != 2:
-            raise ValueError(
-                f"{resolved}:{number}: expected exactly two fields")
-        gene, token = row
-        validate_identifier(gene, source=f"{resolved}:{number}:1")
-        if gene in seen:
-            raise ValueError(f"{resolved}:{number}: duplicate gene {gene!r}")
-        seen.add(gene)
-        genes.append(gene)
-        values.append(parse_decimal_float(token,
-            source=f"{resolved}:{number}:2"))
-    return pd.Series(values, index=genes, name=sid, dtype=np.float64)
 
 
 def build_matrix(raw_paths: Iterable[str], data_dir: Path) -> pd.DataFrame:
@@ -1481,7 +456,7 @@ def build_matrix(raw_paths: Iterable[str], data_dir: Path) -> pd.DataFrame:
     for raw_path in raw_paths:
         sid = sample_id(raw_path)
         resolved = resolve_sample_path(raw_path, data_dir)
-        series_by_sample[sid] = _read_sample_expression(resolved, sid)
+        series_by_sample[sid] = read_sample_expression(resolved, sid)
         folders.setdefault(str(resolved.parent), []).append(sid)
 
     matrix = pd.DataFrame(series_by_sample)
@@ -1635,7 +610,7 @@ def _write_staged_inputs(
     for gene in gene_names:
         validate_name(gene, what="gene name", source="expression matrix")
 
-    node_count = _tree_node_count(len(sample_names))
+    node_count = tree_node_count(len(sample_names))
     max_node_id = node_count - 1
 
     for sample in sample_names:
@@ -1659,30 +634,17 @@ def _write_staged_inputs(
                 )
 
     (staging_dir / MATRIX_GENES_FILE).write_text(
-        "\n".join(gene_names) + "\n", encoding="utf-8", newline="\n"
+        render_identifiers(gene_names), encoding="utf-8", newline="\n"
     )
     (staging_dir / MATRIX_SAMPLES_FILE).write_text(
-        "\n".join(sample_names) + "\n", encoding="utf-8", newline="\n"
+        render_identifiers(sample_names), encoding="utf-8", newline="\n"
     )
     (staging_dir / SAMPLE_LINEAGES_FILE).write_text(
-        "\n".join(
-            f"{sample} {len(hierarchy[sample])} "
-            + " ".join(str(node_id) for node_id in hierarchy[sample])
-            for sample in sample_names
-        )
-        + "\n",
-        encoding="utf-8",
-        newline="\n",
+        render_sample_lineages(sample_names, hierarchy),
+        encoding="utf-8", newline="\n",
     )
-
-    integer_matrix = to_integer_matrix(matrix)
-    integer_matrix.to_csv(
-        staging_dir / MATRIX_VALUES_FILE,
-        header=False,
-        index=False,
-        sep=" ",
-        lineterminator="\n",
-    )
+    write_matrix_values(staging_dir / MATRIX_VALUES_FILE,
+                        to_integer_matrix(matrix).to_numpy())
 
 
 def publish_inputs(
@@ -1769,6 +731,7 @@ def publish_inputs(
             out_dir / PREPARED_PROVENANCE_FILE, stage="prepare",
             outputs=[out_dir / name for name in INPUT_FILES],
             inputs=source_paths, parents=parent_manifests,
+            producer=Path(__file__),
         )
         if old_commit_hash != sha256_file(prepared_manifest):
             invalidate_dependents(
@@ -1953,85 +916,19 @@ def _invalidate_untrusted_variance(out_dir: Path,
 # ======================================================================
 # Block 5: Native Build and Execution
 # ======================================================================
-def _resolve_compiler(explicit_cxx: str | None) -> str:
-    """Resolve requested or automatically discovered C++ compiler.
-
-    Resolve the requested or automatically discovered C++ compiler.
-
-    Args:
-        explicit_cxx: Compiler executable supplied by ``--cxx``.
-
-    Returns:
-        Resolved compiler executable path/name.
-
-    Raises:
-        RuntimeError: If no supported compiler executable can be found.
-    """
-    requested = explicit_cxx or os.environ.get("CXX")
-    if requested:
-        resolved = shutil.which(requested)
-        if resolved is not None:
-            return resolved
-        candidate = Path(requested)
-        if candidate.is_file():
-            if os.name != "nt" and not os.access(candidate, os.X_OK):
-                raise RuntimeError(
-                    f"Requested C++ compiler is not executable: {requested}"
-                )
-            return str(candidate.resolve())
-        raise RuntimeError((
-            f'Requested C++ compiler was not found: '
-            f'{requested}'
-        ))
-
-    candidates = (
-        ("cl", "clang-cl", "g++", "clang++", "c++")
-        if os.name == "nt"
-        else ("c++", "g++", "clang++")
-    )
-    for candidate in candidates:
-        resolved = shutil.which(candidate)
-        if resolved is not None:
-            return resolved
-
-    if os.name == "nt":
-        raise RuntimeError(
-            "No supported C++ compiler found. Use a Visual Studio Developer "
-            "Command Prompt for cl.exe, install MinGW/LLVM, or pass --cxx."
-        )
-    raise RuntimeError(
-        (
-            'No C++ compiler found. Install g++ or clang++, '
-            'set CXX, or pass --cxx.'
-        )
-    )
-
-
-def _compiler_family(cxx: str) -> str:
-    """Classify a compiler driver as GNU-style or MSVC-style.
-
-    Args:
-        cxx: Resolved compiler executable.
-
-    Returns:
-        ``"msvc"`` for ``cl``/``clang-cl`` and ``"gnu"`` otherwise.
-    """
-    name = Path(cxx).name.lower()
-    if name in {"cl", "cl.exe", "clang-cl", "clang-cl.exe"}:
-        return "msvc"
-    return "gnu"
-
-
 def build_native_binary(
     source: Path,
     out_dir: Path,
     *,
     explicit_cxx: str | None = None,
 ) -> Path:
-    """Compile and publish the native variance executable.
+    """Build the native variance executable and publish it.
 
-    GCC/MinGW and ``clang++`` use GNU-style flags. MSVC ``cl.exe`` and
-    ``clang-cl`` use MSVC-style flags.
+    pipeline_native builds the program, or takes it from its cache in
+    the per-user cache folder, with the compiler that ``explicit_cxx``,
+    ``CXX`` or discovery selects. A copy is published in ``out_dir``,
+    where the variance result's provenance names it, unless the copy
+    there already matches.
 
     Args:
         source: C++ source file.
@@ -2043,8 +940,8 @@ def build_native_binary(
 
     Raises:
         FileNotFoundError: If the C++ source is missing.
-        RuntimeError: If no supported compiler can be found.
-        subprocess.CalledProcessError: If compilation fails.
+        RuntimeError: If no supported compiler can be found or
+            compilation fails.
     """
     source = source.resolve()
     if not source.is_file():
@@ -2052,9 +949,8 @@ def build_native_binary(
 
     out_dir = out_dir.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
-    cxx = _resolve_compiler(explicit_cxx)
-    family = _compiler_family(cxx)
-    exe_name = EXECUTABLE_STEM + (".exe" if os.name == "nt" else "")
+    compiler = find_compiler(explicit_cxx)
+    exe_name = EXECUTABLE_STEM + EXE_SUFFIX
     exe_path = out_dir / exe_name
     source_hash = sha256_file(source)
     artifact_header = source.with_name(NATIVE_FILES_HEADER_FILE)
@@ -2063,16 +959,19 @@ def build_native_binary(
             f"Shared native filename header not found: {artifact_header}"
         )
     artifact_header_hash = sha256_file(artifact_header)
+    built = build_program(source, compiler)
+    built_hash = sha256_file(built)
     state = load_state(out_dir)
     existing_build = state.get("build")
 
     if (
         existing_build is not None
-        and existing_build["compiler"] == cxx
-        and existing_build["compiler_family"] == family
+        and existing_build["compiler"] == compiler.path
+        and existing_build["compiler_family"] == compiler.family
         and existing_build["source_sha256"] == source_hash
         and existing_build["artifact_header_sha256"] == artifact_header_hash
         and existing_build["executable"] == exe_name
+        and existing_build["executable_sha256"] == built_hash
         and exe_path.is_file()
     ):
         actual_executable_hash = sha256_file(exe_path)
@@ -2083,53 +982,20 @@ def build_native_binary(
         LOGGER.warning(
             (
                 'Existing executable does not match committed '
-                'build metadata; rebuilding'
+                'build metadata; republishing'
             )
         )
-
-    LOGGER.info("Compiling %s with %s", source, cxx)
 
     with tempfile.TemporaryDirectory(
         dir=out_dir, prefix=".compute_variances_build_"
     ) as build_name:
         build_dir = Path(build_name)
         temporary_exe = build_dir / exe_name
-
-        if family == "msvc":
-            object_path = build_dir / f"{EXECUTABLE_STEM}.obj"
-            command = [
-                cxx,
-                "/nologo",
-                "/O2",
-                "/std:c++20",
-                "/EHsc",
-                str(source),
-                f"/Fe:{temporary_exe}",
-                f"/Fo:{object_path}",
-            ]
-        else:
-            # -ffp-contract=off: fused multiply-adds, which Apple Clang
-            # uses by default on arm64, would change the results there.
-            command = [
-                cxx,
-                "-O2",
-                "-std=c++20",
-                "-ffp-contract=off",
-                "-o",
-                str(temporary_exe),
-                str(source),
-            ]
-
-        subprocess.run(command, check=True, cwd=out_dir)
-        if not temporary_exe.is_file():
-            raise RuntimeError(
-                f"Compiler reported success but did not create {temporary_exe}"
-            )
+        shutil.copy(built, temporary_exe)
 
         new_executable_hash = sha256_file(temporary_exe)
-        # Reload state because compilation can be long-running and
-        # another trusted process may have updated the pipeline metadata
-        # meanwhile.
+        # Reload state in case another trusted process has updated the
+        # pipeline metadata meanwhile.
         state = load_state(out_dir)
         old_build = state.get("build")
         old_executable_hash = (
@@ -2139,8 +1005,8 @@ def build_native_binary(
         _invalidate_untrusted_variance(out_dir, state)
 
         new_build: BuildState = {
-            "compiler": cxx,
-            "compiler_family": family,
+            "compiler": compiler.path,
+            "compiler_family": compiler.family,
             "source_sha256": source_hash,
             "artifact_header_sha256": artifact_header_hash,
             "executable": exe_name,
@@ -2215,6 +1081,7 @@ def _copy_committed_inputs(source_dir: Path, run_dir: Path) -> None:
         outputs=[run_dir / name for name in INPUT_FILES],
         inputs=[source_dir / name for name in INPUT_FILES],
         parents=[source_dir / PREPARED_PROVENANCE_FILE],
+        producer=Path(__file__),
     )
 
 
@@ -2241,8 +1108,7 @@ def run_native_binary(out_dir: Path) -> Path:
         RuntimeError: If input or executable provenance is
             missing/mismatched, or if a successful native process does
             not create the expected output.
-        subprocess.CalledProcessError: If the native program exits
-        nonzero.
+        NativeProgramError: If the native program exits nonzero.
     """
     out_dir = out_dir.resolve()
     state = ensure_committed_inputs(out_dir)
@@ -2288,7 +1154,7 @@ def run_native_binary(out_dir: Path) -> Path:
         run_dir = Path(run_name)
         _copy_committed_inputs(out_dir, run_dir)
 
-        subprocess.run([str(exe_path)], check=True, cwd=run_dir)
+        run_program(exe_path, cwd=run_dir)
 
         staged_variance = run_dir / TERM_VARIANCES_FILE
         if not staged_variance.is_file():
@@ -2315,6 +1181,7 @@ def run_native_binary(out_dir: Path) -> Path:
         outputs=[variance_path],
         inputs=[out_dir / name for name in INPUT_FILES] + [exe_path],
         parents=[out_dir / PREPARED_PROVENANCE_FILE],
+        producer=Path(__file__),
     )
     return variance_path
 
@@ -2499,22 +1366,8 @@ def validate_variance_output(path: Path, out_dir: Path) -> None:
             invalid.
         OSError: If an input cannot be read.
     """
-    genes = set(read_identifiers(out_dir / MATRIX_GENES_FILE, label="gene"))
-    seen: set[tuple[str, int, int]] = set()
-    for number, line in enumerate(read_utf8_lines(path), 1):
-        fields = line.split()
-        if len(fields) != 4:
-            raise ValueError(f"{path}:{number}: expected four variance fields")
-        gene, threshold, operator, variance = fields
-        value = parse_canonical_int(threshold, source=f"{path}:{number}:2")
-        code = parse_canonical_int(operator, source=f"{path}:{number}:3")
-        statistic = parse_decimal_float(variance, source=f"{path}:{number}:4")
-        key = (gene, value, code)
-        if gene not in genes or code not in {0, 1, 2} or statistic < 0:
-            raise ValueError(f"{path}:{number}: invalid variance term")
-        if key in seen:
-            raise ValueError(f"{path}:{number}: duplicate variance term")
-        seen.add(key)
+    read_term_variances(
+        path, read_identifiers(out_dir / MATRIX_GENES_FILE, label="gene"))
 
 
 def _prepare_stage(args: argparse.Namespace, out_dir: Path) -> None:

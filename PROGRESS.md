@@ -45,7 +45,143 @@ request into `main`; each task is one commit.
   replaces the original error, and a stage reports success only after
   its commit.
 
+## Phase 2 working notes
+
+- Order: 2.7, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.9, 2.10, 2.8; one commit
+  per task, golden check (`--skip-slow` while iterating, full before
+  pushing) and regression tests before each commit.
+- `pipeline_io.py` imports only the standard library: constants and
+  artifact owners, UTF-8 and CSV transport, machine grammar, the hash
+  memo, today's provenance code and one atomic writer. Since task 2.4
+  every script imports from the core modules directly (Tjala's import
+  of `validate_variance_output` went in 2.8, with the term-variance
+  reader). The console prompt moved into `pipeline_io.py` in 2.4, so
+  that no script depends on `compute_variances.py` for it; task 3.1
+  moves prompting into `pipeline_cli.py`.
+- Task 2.4 routes the five format writers through pipeline_formats
+  (the lineages, matrix and identifier lists of the variance
+  preparation, Tjala's report, the cannot-cluster list and the
+  per-sample CSVs) and deletes the duplicate readers (the lineage and
+  matrix readers of Tjala and of the signature export, the export's
+  report parser, Tjala's list reader and clustering's snapshot
+  reader), the extra node-count checks of Tjala and the signature
+  export, the pass-through wrappers, `_decode_tree_states`, the
+  linkage checks that the validated topology already guarantees
+  (SciPy's `is_valid_linkage` stays) and `_parse_hierarchy_id`. Tjala,
+  the signature export and the variance state now write through
+  pipeline_io's atomic writer, which also removes the signature
+  export's private temporary-file code that task 5.4 names; their
+  outputs get permissions from the umask, like every other output.
+  Readers now apply the producer's rules: matrix values outside int32,
+  lineages out of node order and malformed reports are rejected.
+- `pipeline_formats.py` may import NumPy and pandas: topology, tree
+  states (history), snapshots, lineages, matrix, signature report,
+  cannot-cluster list, per-sample CSVs, and the Python history writer
+  from the review's prototype (`histbench/np_reconstruct.py`).
+- `pipeline_native.py` (task 2.3): the compiler comes from `--cxx`,
+  then `CXX`, then discovery: on Windows `cl` in an active Developer
+  prompt, then the newest Visual Studio with the C++ tools through
+  vswhere (with the environment its `vcvarsall.bat` sets up), then
+  everywhere `g++` and `clang++` on PATH. The plan's risk register
+  lists `CXX` after vswhere; it stays ahead of discovery because the
+  scripts keep their configuration mechanisms, and the harness's
+  MinGW runs rely on it. Builds go to
+  `<user cache>/tavnit/build/<program>-<key>`, keyed on the source and
+  the local headers it includes, the compiler's path and version
+  (with `INCLUDE` for MSVC) and the flags; the compiler reads copies
+  of exactly the hashed files, and an entry whose program has changed
+  is rebuilt. GNU-style builds use `-std=c++20 -O2 -ffp-contract=off`,
+  MSVC `/nologo /std:c++20 /O2 /EHsc /utf-8`. Compiler and program
+  output reach the console live. `reconstruct_hierarchy` is built and
+  run with `python pipeline_native.py run reconstruct_hierarchy
+  clustering_results` until task 4.1 removes it. compute_variances
+  keeps publishing a copy of its program into the results folder,
+  because the variance result's provenance and the state JSON name
+  it; task 4.2 deletes both. The golden harness now counts any other
+  executable in a work folder as an artifact.
+- Format inventory for 2.2 and 2.4 (where each reader and writer lives
+  today; 2.2 moves or builds the canonical one in pipeline_formats,
+  2.4 switches the callers and deletes the rest):
+  - topology: `read_tree_topology` (moved); wrappers
+    `build_dendrogram.load_tree_topology`,
+    `samples_by_cluster.load_tree_topology`,
+    `clustering._load_tree_topology`.
+  - history: `read_tree_states`, `validate_tree_states`,
+    `load_tree_states` (moved); `samples_by_cluster.load_tree_states`
+    and `validate_history_against_topology`,
+    `build_dendrogram._decode_tree_states`,
+    `compute_variances._parse_hierarchy_id`; writer
+    `render_tree_states` (new, matches reconstruct_hierarchy on every
+    golden case).
+  - snapshots: `read_snapshots` (new); `clustering._read_iteration_assignments`
+    and `_validate_clustering_outputs`.
+  - lineages: writer in `compute_variances._write_staged_inputs`
+    ("sample count id..." in root-to-leaf order); readers
+    `samples_by_signature.load_sample_lineages`, inline in
+    `tjala.load_algorithm_data`.
+  - matrix: writer `_write_staged_inputs` (int32, space-separated, one
+    row per gene); readers `samples_by_signature.load_expression_values`
+    (streams, keeps selected rows), inline in `tjala.load_algorithm_data`.
+  - signature report: writer `tjala._format_*` and `_write_text_atomically`;
+    parser `samples_by_signature.parse_antecedent`,
+    `_parse_cluster_section`, `parse_signature_block`, `load_signatures`;
+    canonical `render_signature_report` and `read_signature_report`
+    (new; every golden report reads back and re-renders byte for
+    byte).
+  - cannot-cluster list: writer `samples_by_cluster._write_leaf_cluster_file`;
+    reader inline in `tjala.load_algorithm_data`; canonical
+    `render_cluster_list` and `read_cluster_list` (new, with the
+    hand-written forms task 1.10 accepts).
+  - per-sample CSV: writer inside `clustering.write_sample_csvs`; reader
+    `read_sample_expression` (moved); canonical writer
+    `render_sample_expression` (new, reproduces every golden CSV).
+- The report parser accepts exactly what the writer produces: the
+  signatures with their stop reason, conditions, both cluster sections
+  and the optional scaling section, then the run summary, whose
+  signature count must agree. Lines are compared without stripping,
+  thresholds are canonical integers within int32 (they are observed
+  matrix values), percentages have one decimal and lie in 0.0..100.0,
+  and scaled thresholds are written as Python writes floats. The
+  writer parses its own text back before returning it. So the report
+  meets task 2.10's rules from the start; they take effect when 2.4
+  moves `samples_by_signature.py` onto this parser.
+- Task 2.9: Tjala and samples_by_signature.py derive each sample's
+  lineage from `total_data.csv` and `tree_splits.txt` (through
+  `load_tree_states`) and require `sample_lineages.txt` to match it,
+  which tests the parent-child links and the sample-leaf binding. Both
+  files sit beside the prepared files in the results folder and are
+  already inputs of the prepare stage, so the manifests do not change.
+  The history reader checks that rows are sorted by their node history.
+- Task 2.10: a blank record holds only ASCII spaces and tabs, and a
+  record of nothing but control characters (and spaces) is an error
+  wherever blanks are allowed or not; `pipeline_io.is_blank` is the one
+  test. The topology, lineages, matrix and term variances split on a
+  single ASCII space, and the cannot-cluster list on commas,
+  semicolons and ASCII whitespace; a no-break space or any other
+  Unicode whitespace is content that the format then rejects. Report
+  thresholds have used the canonical integer grammar since 2.4.
+- Task 2.8: `tests/unit/` covers every shared format, the C++ grammar
+  (a harness includes each program's source and feeds its parsers the
+  tokens pipeline_io sees) and the history writer against
+  `reconstruct_hierarchy` on random trees of 2 to 300 samples. The
+  boundary self-test lists every text read left in the stage scripts
+  with the reason it is not a pipeline format. Writing it found two
+  formats still parsed outside the core, so their readers moved into
+  pipeline_formats in the same commit: `term_variances.txt` (Tjala and
+  the variance stage; `read_term_variances` keeps converting numbers
+  with pandas, as Tjala always has, so its results do not move) and
+  `filenames.txt` (`read_sample_paths`, used by the snapshot reader and
+  clustering.py). Tjala no longer imports compute_variances.py.
+- Part 2 runs from copies in `clustering_results`, so the README's copy
+  list and the golden harness's `PACKAGE` and `PART2` lists gain the
+  core modules.
+
 ## Findings
+
+- Phase 2, task 2.5: from task 2.1 until this task, the variance
+  stage's three manifests named pipeline_io.py as their producer, as
+  finding A8 predicted, because the moved manifest writer defaulted to
+  its own module. The producer is now a required argument.
 
 - Phase 0: on the 300-sample timing set under Python 3.10, Tjala stops
   with "Normalized pheromones do not sum to 1.0: 0.9999999999986108"
@@ -137,16 +273,16 @@ request into `main`; each task is one commit.
 
 | Task | Summary | Status |
 | --- | --- | --- |
-| 2.1 | Create pipeline_io.py from Block 0 of compute_variances.py: constants and artifact owners, UTF-8 and CSV... | Not started |
-| 2.2 | Create pipeline_formats.py: topology, snapshots, history reader and validator, lineages, the matrix... | Not started |
-| 2.3 | Create pipeline_native.py from the MSVC-capable helper in compute_variances.py, adding vswhere, MinGW and... | Not started |
-| 2.4 | Switch every script to the core and delete what it replaces: five writers, four duplicate readers, three... | Not started |
-| 2.5 | Make producer a required argument of the manifest writer. | Not started |
-| 2.6 | Replace repeated literals with the constants: clustering_results, the parsed-data suffixes, .provenance,... | Not started |
-| 2.7 | Delete the 10 unused imports and the if True: blocks. | Not started |
-| 2.8 | Unit tests for every shared format and grammar: report round trip, Python–C++ grammar agreement, and the... | Not started |
-| 2.9 | Strengthen the format checks: each lineage must follow real parent–child links in the topology and end at... | Not started |
-| 2.10 | Make writer and readers agree: each format splits on the exact ASCII separator it names and rejects other... | Not started |
+| 2.1 | Create pipeline_io.py from Block 0 of compute_variances.py: constants and artifact owners, UTF-8 and CSV... | Done |
+| 2.2 | Create pipeline_formats.py: topology, snapshots, history reader and validator, lineages, the matrix... | Done |
+| 2.3 | Create pipeline_native.py from the MSVC-capable helper in compute_variances.py, adding vswhere, MinGW and... | Done |
+| 2.4 | Switch every script to the core and delete what it replaces: five writers, four duplicate readers, three... | Done |
+| 2.5 | Make producer a required argument of the manifest writer. | Done |
+| 2.6 | Replace repeated literals with the constants: clustering_results, the parsed-data suffixes, .provenance,... | Done |
+| 2.7 | Delete the 10 unused imports and the if True: blocks. | Done |
+| 2.8 | Unit tests for every shared format and grammar: report round trip, Python–C++ grammar agreement, and the... | Done |
+| 2.9 | Strengthen the format checks: each lineage must follow real parent–child links in the topology and end at... | Done |
+| 2.10 | Make writer and readers agree: each format splits on the exact ASCII separator it names and rejects other... | Done |
 
 ### Phase 3: Command-line layer
 

@@ -29,15 +29,22 @@ newer than the minimums into the current environment; CI uses it,
 under a randomly chosen newer Python, for the second run of each
 toolchain.
 
-Run the scenarios with the toolchain of the machine:
+Run the scenarios with the toolchain of the machine. The harness names
+the toolchain's compiler through `CXX` and `--cxx`, and every program
+is built through `pipeline_native.py` into the per-user cache folder:
 
-| Toolchain | Compilers it uses |
+| Toolchain | Compiler it uses |
 | --- | --- |
 | `linux-gcc` | `g++` |
 | `linux-clang` | `clang++` |
 | `macos-clang` | `clang++` |
 | `windows-mingw` | MinGW-w64 `g++` |
-| `windows-msvc` | `cl` for the hierarchy and variance programs, and MinGW-w64 `g++` for `run_clustering`, because today's `clustering.py` drives GNU-style compilers only. Run it from a Developer PowerShell with MinGW-w64 `g++` on `PATH`. |
+| `windows-msvc` | `cl`; run it from a Developer PowerShell. |
+
+An executable that a stage leaves in a work folder counts as an
+artifact, so a build that lands in the code folder shows up as a
+difference. The variance stage's own copy of its program is the
+exception: its provenance names that copy.
 
 ```text
 python tests/golden.py --toolchain linux-gcc             # compare
@@ -61,6 +68,21 @@ Scenarios run in `.golden-work/`; stage output goes to
 The 22-sample set has three genes only in each cohort, one gene that is
 zero everywhere, and two identical samples. `data/make_cohorts.py` and
 `data/make_trees.py` generate every dataset from fixed seeds.
+
+## Regression and unit tests
+
+```text
+python -m pytest -p no:cacheprovider tests/regression tests/unit
+```
+
+`tests/regression/` holds one or more tests per plan task; they build
+the 22-sample workflow with the machine's toolchain, or the one that
+`TAVNIT_TOOLCHAIN` names. `tests/unit/` tests every shared format
+(each writer against its reader), holds the C++ programs' integer and
+decimal grammar to pipeline_io's, compares the Python history writer
+with `reconstruct_hierarchy` byte for byte, and checks that no stage
+script parses a pipeline format outside `pipeline_io.py` and
+`pipeline_formats.py` (`test_core_boundary.py`, Phase 2's exit gate).
 
 ## Baselines
 
