@@ -82,6 +82,12 @@ request into `main`; each task is one commit.
   report) now skip an identical result. The C++ engines and the
   variance preparation still rewrite their outputs; Phase 5's commit
   (task 5.3) applies the same rule to every stage.
+- Phase 1, task 1.13: once the C++ programs built on macOS, Apple
+  Clang's default fused multiply-adds on arm64 changed the last digits
+  of `term_variances.txt`; GNU-style builds now pass
+  `-ffp-contract=off`. Since then macOS (arm64), Windows and Linux
+  (x86-64) give byte-identical results in every scenario except where
+  sample paths appear.
 - Phase 1: provenance records name absolute paths, so a results folder
   that is copied or moved loses the links between its outputs and their
   parents; invalidation then misses them. Phase 5's relative paths and
