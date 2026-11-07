@@ -174,6 +174,28 @@ def prompt_folder_paths(prompt_text: str, expected_count: int) -> list[str]:
 # ======================================================================
 
 
+def _reject_duplicate_headers(filepath: str, headers: list[str]) -> None:
+    """Refuse a table whose header row names a column twice.
+
+    pandas would rename the second occurrence (S1 becomes S1.1), which
+    silently turns one sample into two different ones.
+
+    Args:
+        filepath: Source table, named in the error.
+        headers: Header-row names in file order.
+
+    Raises:
+        ValueError: If a name occurs more than once.
+    """
+    seen: set[str] = set()
+    for name in headers:
+        if name in seen:
+            raise ValueError(
+                f"{filepath}: duplicate sample header {name!r}"
+            )
+        seen.add(name)
+
+
 def _read_por_wrapper(filepath: str) -> pd.DataFrame:
     """Read a POR file and return its DataFrame."""
     import pyreadstat
@@ -197,6 +219,7 @@ def _read_tab_delimited(filepath: str) -> pd.DataFrame:
     rows = [line.split("\t") for line in read_utf8_lines(Path(filepath))]
     if len(rows) < 2 or any(len(row) != len(rows[0]) for row in rows):
         raise ValueError(f"{filepath}: inconsistent TSV records")
+    _reject_duplicate_headers(filepath, rows[0])
     return pd.DataFrame(rows[1:], columns=rows[0])
 
 
@@ -218,6 +241,7 @@ def _read_csv(filepath: str) -> pd.DataFrame:
         raise ValueError(f"{filepath}: expected sample headers and data")
     if any(len(row) != len(rows[0]) for row in rows[1:]):
         raise ValueError(f"{filepath}: inconsistent field count")
+    _reject_duplicate_headers(filepath, rows[0])
     return pd.DataFrame(rows[1:], columns=rows[0])
 
 
@@ -237,6 +261,7 @@ def _read_dat(filepath: str) -> pd.DataFrame:
     rows = [line.split() for line in read_utf8_lines(Path(filepath))]
     if len(rows) < 2 or any(len(row) != len(rows[0]) for row in rows):
         raise ValueError(f"{filepath}: inconsistent DAT records")
+    _reject_duplicate_headers(filepath, rows[0])
     return pd.DataFrame(rows[1:], columns=rows[0])
 
 
@@ -246,6 +271,9 @@ def _read_excel(filepath: str) -> pd.DataFrame:
     Excel is treated like CSV/TSV/DAT input: row 1 is a column-header
     row of sample names, not a data row.
     """
+    header = pd.read_excel(filepath, header=None, nrows=1, dtype=str,
+                           keep_default_na=False)
+    _reject_duplicate_headers(filepath, header.iloc[0].tolist())
     return pd.read_excel(filepath, header=0, dtype=str, keep_default_na=False)
 
 
@@ -266,8 +294,12 @@ def _read_json(filepath: str) -> pd.DataFrame:
         ValueError: If the file is not an array of objects.
         OSError: If the file cannot be read.
     """
+    def unique_keys(pairs: list[tuple[str, object]]) -> dict:
+        _reject_duplicate_headers(filepath, [key for key, _ in pairs])
+        return dict(pairs)
+
     with open(filepath, encoding="utf-8") as stream:
-        records = json.load(stream)
+        records = json.load(stream, object_pairs_hook=unique_keys)
     if not isinstance(records, list) or not all(
             isinstance(record, dict) for record in records):
         raise ValueError(f"{filepath}: expected a JSON array of records")
@@ -351,7 +383,9 @@ def _load_dataframe(file_path: str, reader: Reader) -> pd.DataFrame:
         RuntimeError: If a dependency is missing or the reader fails.
     """
     try:
-        return reader(file_path)
+        table = reader(file_path)
+        _reject_duplicate_headers(file_path, [str(c) for c in table.columns])
+        return table
     except ImportError as exc:
         raise RuntimeError(
             (

@@ -208,7 +208,7 @@ jobs:
         run: |
           python -m pip install uv
           python -m uv pip install --system --resolution lowest-direct --only-binary :all: -r requirements.txt
-          python -m pip install pytest
+          python -m pip install pytest openpyxl
       - name: Run the regression tests
         run: python -m pytest -p no:cacheprovider tests/regression
 

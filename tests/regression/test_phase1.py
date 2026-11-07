@@ -148,3 +148,42 @@ def test_1_11_json_identifiers_stay_text(tmp_path: Path) -> None:
     table = clustering._read_json(str(source))
     assert table["gene"].tolist() == ["001", "010"]
     assert table["S1"].tolist() == [5.25, 0.1]
+
+
+def _assert_duplicate_rejected(clustering, source: Path) -> None:
+    """Check that loading ``source`` names the file and the header."""
+    import pytest
+
+    reader = clustering.FILE_READERS[source.suffix]
+    with pytest.raises(RuntimeError) as error:
+        clustering._load_dataframe(str(source), reader)
+    assert "duplicate sample header 'S1'" in str(error.value)
+    assert source.name in str(error.value)
+
+
+def test_1_12_duplicate_csv_and_json_headers_are_rejected(
+        tmp_path: Path) -> None:
+    """Task 1.12: CSV and JSON input refuse a repeated sample name."""
+    clustering = _load("clustering")
+    csv_source = tmp_path / "matrix.csv"
+    csv_source.write_text("gene,S1,S1\nG1,1,2\n", encoding="utf-8")
+    _assert_duplicate_rejected(clustering, csv_source)
+    json_source = tmp_path / "matrix.json"
+    json_source.write_text('[{"gene": "G1", "S1": 1, "S1": 2}]',
+                           encoding="utf-8")
+    _assert_duplicate_rejected(clustering, json_source)
+
+
+def test_1_12_duplicate_excel_header_is_rejected(tmp_path: Path) -> None:
+    """Task 1.12: Excel input refuses a repeated sample name."""
+    import pytest
+
+    openpyxl = pytest.importorskip("openpyxl")
+    clustering = _load("clustering")
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.append(["gene", "S1", "S1"])
+    sheet.append(["G1", 1, 2])
+    source = tmp_path / "matrix.xlsx"
+    workbook.save(source)
+    _assert_duplicate_rejected(clustering, source)
