@@ -73,12 +73,13 @@ DEFAULT_WORK = REPO / ".golden-work"
 PACKAGE = (
     "README.md", "build_dendrogram.py", "clustering.py",
     "compute_variances.cpp", "compute_variances.py", "pipeline_files.hpp",
-    "reconstruct_hierarchy.cpp", "run_clustering.cpp",
+    "pipeline_io.py", "reconstruct_hierarchy.cpp", "run_clustering.cpp",
     "samples_by_cluster.py", "samples_by_signature.py", "tjala.py",
 )
 PART2 = (
     "compute_variances.py", "compute_variances.cpp", "pipeline_files.hpp",
-    "samples_by_cluster.py", "tjala.py", "samples_by_signature.py",
+    "pipeline_io.py", "samples_by_cluster.py", "tjala.py",
+    "samples_by_signature.py",
 )
 BINARY_NAMES = {
     "run_clustering.out", "run_clustering.exe", "reconstruct_hierarchy",

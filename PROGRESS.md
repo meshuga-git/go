@@ -160,7 +160,7 @@ request into `main`; each task is one commit.
 
 | Task | Summary | Status |
 | --- | --- | --- |
-| 2.1 | Create pipeline_io.py from Block 0 of compute_variances.py: constants and artifact owners, UTF-8 and CSV... | Not started |
+| 2.1 | Create pipeline_io.py from Block 0 of compute_variances.py: constants and artifact owners, UTF-8 and CSV... | Done |
 | 2.2 | Create pipeline_formats.py: topology, snapshots, history reader and validator, lineages, the matrix... | Not started |
 | 2.3 | Create pipeline_native.py from the MSVC-capable helper in compute_variances.py, adding vswhere, MinGW and... | Not started |
 | 2.4 | Switch every script to the core and delete what it replaces: five writers, four duplicate readers, three... | Not started |
