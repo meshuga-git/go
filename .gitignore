@@ -1,0 +1,17 @@
+# Golden-test work folders and logs
+.golden-work/
+# Python caches
+__pycache__/
+*.pyc
+# Programs and objects the pipeline compiles
+run_clustering.out
+*.exe
+*.obj
+*.o
+*.pdb
+*.ilk
+reconstruct_hierarchy
+compute_variances
+# Local virtual environments
+.venv*/
+venv*/

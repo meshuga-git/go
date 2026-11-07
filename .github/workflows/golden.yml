@@ -1,0 +1,149 @@
+# Golden tests (plan tasks 0.3 and 0.4): every toolchain the plan names,
+# under Python 3.10 (the version ceiling) and the newest Python.
+# A job compares its results with tests/golden/<key>.json; where no such
+# file exists yet, the job records one. Every job uploads its results as
+# an artifact, and the publish job also commits them to the ci-results
+# branch, under the name of the tested branch, so they can be read with
+# git alone.
+
+name: golden
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: golden-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  golden:
+    name: ${{ matrix.toolchain }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.14"]
+        toolchain:
+          [linux-gcc, linux-clang, windows-msvc, windows-mingw, macos-clang]
+        include:
+          - toolchain: linux-gcc
+            os: ubuntu-24.04
+          - toolchain: linux-clang
+            os: ubuntu-24.04
+          - toolchain: windows-msvc
+            os: windows-2022
+          - toolchain: windows-mingw
+            os: windows-2022
+          - toolchain: macos-clang
+            os: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      # Both Windows toolchains need MinGW g++: today's clustering.py
+      # builds run_clustering with GNU-style options only.
+      - name: Install MinGW-w64 GCC through MSYS2
+        if: runner.os == 'Windows'
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: mingw-w64-ucrt-x86_64-gcc
+
+      - name: Put MinGW g++ on PATH
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          Add-Content $env:GITHUB_PATH
+          "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin"
+
+      - name: Set up the MSVC developer environment
+        if: matrix.toolchain == 'windows-msvc'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install the pinned packages
+        run: python -m pip install -r requirements.txt
+
+      - name: Run the golden scenarios
+        run: >-
+          python tests/golden.py --toolchain ${{ matrix.toolchain }}
+          --allow-missing
+          --out results/${{ matrix.toolchain }}-${{ matrix.python }}.json
+
+      - name: Upload results and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-${{ matrix.toolchain }}-${{ matrix.python }}
+          path: |
+            results/
+            .golden-work/_logs/
+          if-no-files-found: ignore
+
+  publish:
+    name: publish results
+    needs: golden
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: publish-ci-results
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: golden-*
+          path: artifacts
+
+      - name: Commit the results to the ci-results branch
+        env:
+          TESTED: ${{ github.head_ref || github.ref_name }}
+          RUN_ID: ${{ github.run_id }}
+          TESTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          REPO_URL: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git clone --quiet --depth 1 --branch ci-results "$REPO_URL" out; then
+            :
+          else
+            git init --quiet out
+            git -C out checkout --quiet --orphan ci-results
+            git -C out remote add origin "$REPO_URL"
+          fi
+          rm -rf "out/$TESTED"
+          mkdir -p "out/$TESTED"
+          find artifacts -path '*/results/*.json' -exec cp {} "out/$TESTED/" \;
+          printf 'run %s\ncommit %s\n' "$RUN_ID" "$TESTED_SHA" > "out/$TESTED/RUN"
+          git -C out add -A
+          git -C out commit --quiet -m "Results of run $RUN_ID on $TESTED ($TESTED_SHA)"
+          for attempt in 1 2 3; do
+            if git -C out push --quiet origin ci-results; then exit 0; fi
+            git -C out pull --quiet --rebase origin ci-results || true
+          done
+          exit 1
+
+  style:
+    name: style report
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install the checkers
+        run: python -m pip install -r requirements-dev.txt
+      - name: Report findings (report-only until the plan makes them binding)
+        run: python tests/check_style.py
