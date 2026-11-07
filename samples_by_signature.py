@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
+from pipeline_cli import prompt_input
 from pipeline_formats import (
     Signature,
     iter_matrix_rows,
@@ -29,7 +30,6 @@ from pipeline_io import (
     SAMPLE_LINEAGES_FILE,
     TJALA_OUTPUT_FILE,
     TREE_STATES_FILE,
-    prompt_input,
     provenance_path,
     read_identifiers,
     verify_artifacts,

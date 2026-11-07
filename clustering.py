@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from pipeline_cli import prompt_input
 from pipeline_formats import (
     read_sample_paths,
     read_snapshots,
@@ -37,7 +38,6 @@ from pipeline_io import (
     TREE_TOPOLOGY_FILE,
     invalidate_dependents,
     parse_decimal_float,
-    prompt_input,
     provenance_path,
     read_csv_rows,
     read_provenance,

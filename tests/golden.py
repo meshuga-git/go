@@ -72,15 +72,16 @@ DEFAULT_WORK = REPO / ".golden-work"
 
 PACKAGE = (
     "README.md", "build_dendrogram.py", "clustering.py",
-    "compute_variances.cpp", "compute_variances.py", "pipeline_files.hpp",
-    "pipeline_formats.py", "pipeline_io.py", "pipeline_native.py",
-    "reconstruct_hierarchy.cpp", "run_clustering.cpp",
+    "compute_variances.cpp", "compute_variances.py", "pipeline_cli.py",
+    "pipeline_files.hpp", "pipeline_formats.py", "pipeline_io.py",
+    "pipeline_native.py", "reconstruct_hierarchy.cpp", "run_clustering.cpp",
     "samples_by_cluster.py", "samples_by_signature.py", "tjala.py",
 )
 PART2 = (
-    "compute_variances.py", "compute_variances.cpp", "pipeline_files.hpp",
-    "pipeline_formats.py", "pipeline_io.py", "pipeline_native.py",
-    "samples_by_cluster.py", "tjala.py", "samples_by_signature.py",
+    "compute_variances.py", "compute_variances.cpp", "pipeline_cli.py",
+    "pipeline_files.hpp", "pipeline_formats.py", "pipeline_io.py",
+    "pipeline_native.py", "samples_by_cluster.py", "tjala.py",
+    "samples_by_signature.py",
 )
 # Programs are built in the per-user cache; the variance stage alone
 # publishes a copy of its program, which its provenance names. Any

@@ -37,6 +37,7 @@ The pipeline is intended to work on Windows and POSIX systems (e.g., Linux and m
    compute_variances.cpp
    pipeline_files.hpp
    compute_variances.py
+   pipeline_cli.py
    pipeline_formats.py
    pipeline_io.py
    pipeline_native.py
@@ -116,6 +117,7 @@ The pipeline is intended to work on Windows and POSIX systems (e.g., Linux and m
    compute_variances.py
    compute_variances.cpp
    pipeline_files.hpp
+   pipeline_cli.py
    pipeline_formats.py
    pipeline_io.py
    pipeline_native.py
@@ -200,8 +202,9 @@ The pipeline is intended to work on Windows and POSIX systems (e.g., Linux and m
 This revision implements the changes selected in `changes1.docx`. The
 clustering and Tjala mathematical objectives, split rules, tie-breaking,
 heuristic fallback, search defaults, and threshold conversion are unchanged.
-Shared Python code lives in `pipeline_io.py`, `pipeline_formats.py` and
-`pipeline_native.py`; keep all three beside every Python script.
+Shared Python code lives in `pipeline_cli.py`, `pipeline_io.py`,
+`pipeline_formats.py` and `pipeline_native.py`; keep all four beside
+every Python script.
 The native files contain matching local I/O utilities and require C++20.
 Their artifact filenames are defined once in `pipeline_files.hpp`; keep that
 header beside every C++ source when compiling.

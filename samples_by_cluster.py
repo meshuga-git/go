@@ -20,6 +20,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from pipeline_cli import prompt_input
 from pipeline_formats import (
     TreeTopology,
     read_tree_states,
@@ -31,7 +32,6 @@ from pipeline_io import (
     TREE_STATES_FILE,
     TREE_TOPOLOGY_FILE,
     invalidate_dependents,
-    prompt_input,
     provenance_path,
     publication_unchanged,
     verify_artifacts,

@@ -14,7 +14,8 @@ import ast
 
 from unit_support import REPO
 
-CORE = {"pipeline_io.py", "pipeline_formats.py", "pipeline_native.py"}
+CORE = {"pipeline_cli.py", "pipeline_io.py", "pipeline_formats.py",
+        "pipeline_native.py"}
 # Calls that read files or parse machine tokens.
 READERS = {
     "read_utf8_lines", "iter_utf8_lines", "read_csv_rows",

@@ -176,6 +176,22 @@ request into `main`; each task is one commit.
   list and the golden harness's `PACKAGE` and `PART2` lists gain the
   core modules.
 
+## Phase 3 working notes
+
+- Order: 3.1, 3.2, 3.4, 3.5, 3.6, 3.7. The transcript harness of 3.7
+  was written first and recorded against Phase 2's code, so that every
+  later task is checked against today's prompts; it is committed with
+  task 3.7, together with the transcripts as they end up, and the
+  differences are the ones the plan lists.
+- `pipeline_cli.py` (3.1) imports only the standard library. It owns
+  the console prompt (moved from `pipeline_io.py`), `ask`, which
+  prints a script's own explanation and asks again, and the human
+  grammar: ASCII digits with an optional sign (and, for decimals, a
+  fraction and exponent), spaces and tabs around them ignored. So
+  `1_7`, fullwidth digits, `17.0`, `inf` and `nan` are no longer read
+  as numbers. Sentinels still compare in any case, and only `y` means
+  yes.
+
 ## Findings
 
 - Phase 2, task 2.5: from task 2.1 until this task, the variance
@@ -288,7 +304,7 @@ request into `main`; each task is one commit.
 
 | Task | Summary | Status |
 | --- | --- | --- |
-| 3.1 | Create pipeline_cli.py: one prompt helper that reproduces today's prompts, defaults and sentinels, plus... | Not started |
+| 3.1 | Create pipeline_cli.py: one prompt helper that reproduces today's prompts, defaults and sentinels, plus... | Done |
 | 3.2 | Switch the four prompting scripts to the shared helper, with no change to wording, defaults or sentinels.... | Not started |
 | 3.4 | Add the error classes and run_main() to every script: one tagged line for expected errors, a traceback... | Not started |
 | 3.5 | Console API: prompts, progress, warnings and errors on stderr with the [stage] prefix, README labels and... | Not started |

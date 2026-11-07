@@ -22,6 +22,7 @@ from typing import Any, TypedDict, cast
 import numpy as np
 import pandas as pd
 
+from pipeline_cli import prompt_input
 from pipeline_formats import (
     RUN_STOP_LABELS,
     SCALE_FACTORS,
@@ -52,7 +53,6 @@ from pipeline_io import (
     TREE_STATES_FILE,
     TREE_TOPOLOGY_FILE,
     invalidate_dependents,
-    prompt_input,
     provenance_path,
     publication_unchanged,
     read_identifiers,
