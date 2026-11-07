@@ -24,7 +24,7 @@ request into `main`; each task is one commit.
   versions, or the closest newer ones available, and randomly chosen
   newer versions. The plan's constraints and task 0.1 now say so.
 - Every defect is fixed as soon as possible. The macOS build failure
-  found in Phase 0 is task 1.12 in Phase 1.
+  found in Phase 0 is task 1.13 in Phase 1.
 - Python 3.10 is a ceiling: the code uses nothing newer. Each module
   docstring states the minimum version vermin reports for it, raised to
   what the pinned packages need where that is higher. The plan's
@@ -62,7 +62,7 @@ request into `main`; each task is one commit.
   `run_clustering.cpp` (line 290) and `reconstruct_hierarchy.cpp` (line
   287) do not compile and the pipeline cannot run there. The macOS
   golden files record those build failures as today's behavior; task
-  1.12 fixes them.
+  1.13 fixes them.
 - Phase 0: Windows (MSVC and MinGW-w64 GCC 16) runs every scenario.
   Its results differ from Linux only in files that hold sample paths
   and in the provenance records that hash them; the tree, iteration,
@@ -86,7 +86,7 @@ request into `main`; each task is one commit.
 
 | Task | Summary | Status |
 | --- | --- | --- |
-| 0.1 | Tag the current code as the baseline. Pin the package versions in use in requirements.txt, and record the... | Done |
+| 0.1 | Tag the current code as the baseline. State in requirements.txt the minimal version of each library... | In progress |
 | 0.2 | Golden datasets in tests/data/: the 22-sample synthetic set, five random trees whose paths contain commas,... | Done |
 | 0.3 | Golden outputs: the SHA-256 of every artifact the current code writes, per toolchain (MSVC, MinGW GCC,... | Done |
 | 0.4 | tests/golden.py drives every script non-interactively, feeding its answers on stdin, and compares the hashes. | Done |
@@ -107,8 +107,8 @@ request into `main`; each task is one commit.
 | 1.9 | Strip only the .version suffix from gene IDs, so _PAR_Y IDs stay distinct from their chrX twins. | Not started |
 | 1.10 | Cannot-cluster list: accept 017 and +17. With a manifest, check that it was exported from the current... | Not started |
 | 1.11 | Read JSON input with type inference off, so identifiers such as "001" stay text. | Not started |
-| 1.12 | Build on macOS: replace floating-point std::from_chars, which Apple Clang's library rejects, so that... | Not started |
 | 1.12 | Reject a duplicate sample header in any input format before pandas renames it, naming the file and the header. | Not started |
+| 1.13 | Build on macOS: replace floating-point std::from_chars, which Apple Clang's library rejects, so that... | Not started |
 
 ### Phase 2: Shared core
 
