@@ -52,6 +52,28 @@ INPUT_FILES = (
     MATRIX_GENES_FILE, MATRIX_SAMPLES_FILE,
     SAMPLE_LINEAGES_FILE, MATRIX_VALUES_FILE,
 )
+# The folder the clustering stage writes and Part 2 works in.
+RESULTS_DIR = "clustering_results"
+# Ingestion writes <folder>_parsed_data/ and <folder>_parsed_files.txt
+# beside each input folder.
+PARSED_DATA_SUFFIX = "_parsed_data"
+PARSED_FILES_SUFFIX = "_parsed_files.txt"
+# A manifest is named after its output plus this suffix.
+PROVENANCE_SUFFIX = ".provenance"
+# Snapshot k, the sample assignment after split k, is iter<k>.txt.
+SNAPSHOT_FILE_RE = re.compile(r"iter([1-9][0-9]*)\.txt\Z", re.ASCII)
+
+
+def snapshot_file(split: int) -> str:
+    """Return the file name of the snapshot after one split.
+
+    Args:
+        split: One-based split number.
+
+    Returns:
+        ``iter<split>.txt``.
+    """
+    return f"iter{split}.txt"
 
 
 PROVENANCE_HEADER = "TAVNIT-PROVENANCE-1"
@@ -403,13 +425,12 @@ def provenance_path(path: Path) -> Path:
     """
     if path.name in INPUT_FILES:
         return path.with_name(PREPARED_PROVENANCE_FILE)
-    if path.name in {SAMPLE_PATHS_FILE, TREE_TOPOLOGY_FILE} or re.fullmatch(
-        r"iter[1-9][0-9]*\.txt", path.name
-    ):
+    if (path.name in {SAMPLE_PATHS_FILE, TREE_TOPOLOGY_FILE}
+            or SNAPSHOT_FILE_RE.match(path.name)):
         return path.with_name(CLUSTERING_PROVENANCE_FILE)
-    if path.suffix == ".csv" and path.parent.name.endswith("_parsed_data"):
+    if path.suffix == ".csv" and path.parent.name.endswith(PARSED_DATA_SUFFIX):
         return path.with_name(PARSED_DATA_PROVENANCE_FILE)
-    return path.with_name(path.name + ".provenance")
+    return path.with_name(path.name + PROVENANCE_SUFFIX)
 
 
 def _decode_provenance_field(token: str, *, source: str) -> str:
@@ -703,7 +724,7 @@ def invalidate_dependents(
     for directory in {Path(item).resolve() for item in directories}:
         if not directory.is_dir():
             continue
-        for candidate in directory.glob("*.provenance"):
+        for candidate in directory.glob("*" + PROVENANCE_SUFFIX):
             if candidate.is_symlink():
                 continue
             try:

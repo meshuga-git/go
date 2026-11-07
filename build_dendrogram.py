@@ -48,6 +48,8 @@ from pipeline_io import (
     MUST_LINKS_FILE,
     NO_LINKS_FILE,
     PARSED_DATA_PROVENANCE_FILE,
+    PARSED_DATA_SUFFIX,
+    RESULTS_DIR,
     TREE_STATES_FILE,
     TREE_TOPOLOGY_FILE,
     provenance_path,
@@ -273,7 +275,7 @@ def map_clusters_to_colors(
         if matched is None:
             candidates = []
             for folder in folders:
-                parsed = folder.with_name(folder.name + "_parsed_data")
+                parsed = folder.with_name(folder.name + PARSED_DATA_SUFFIX)
                 if sample.parent.resolve() in {folder, parsed}:
                     candidates.append(folder)
             if len(candidates) == 1:
@@ -1071,7 +1073,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--tree-states",
         type=Path,
-        default=Path("clustering_results") / TREE_STATES_FILE,
+        default=Path(RESULTS_DIR) / TREE_STATES_FILE,
         help="Path to immutable total_data.csv (default: %(default)s).",
     )
     parser.add_argument(

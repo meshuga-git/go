@@ -24,7 +24,12 @@ from pipeline_io import (
     MUST_LINKS_FILE,
     NO_LINKS_FILE,
     PARSED_DATA_PROVENANCE_FILE,
+    PARSED_DATA_SUFFIX,
+    PARSED_FILES_SUFFIX,
+    RESULTS_DIR,
     SAMPLE_PATHS_FILE,
+    SNAPSHOT_FILE_RE,
+    TEMPORARY_SUFFIX,
     TREE_TOPOLOGY_FILE,
     invalidate_dependents,
     parse_decimal_float,
@@ -50,7 +55,6 @@ DISTANCE_METRICS: dict[str, str] = {
 
 OUTPUT_EXTENSION = ".csv"
 
-_ITERATION_FILE_RE = re.compile(r"^iter([1-9]\d*)\.txt$")
 # A gene ID's trailing .version, before an optional GENCODE _PAR_Y.
 _GENE_VERSION_RE = re.compile(r"\.[0-9]+(?=(?:_PAR_Y)?\Z)")
 
@@ -529,7 +533,8 @@ def _clean_output_files(output_path: Path) -> None:
         owned = [output_path / name for name in record.outputs]
     else:
         legacy = output_path.with_name(
-            output_path.name.removesuffix("_parsed_data") + "_parsed_files.txt"
+            output_path.name.removesuffix(PARSED_DATA_SUFFIX)
+            + PARSED_FILES_SUFFIX
         )
         if legacy.is_file():
             for raw in read_utf8_lines(legacy, allow_empty=True):
@@ -717,10 +722,10 @@ def _process_input_folder(
     """
     folder_path = Path(folder).resolve()
     all_files = discover_input_files(str(folder_path))
-    parsed_dir = folder_path.with_name(folder_path.name + "_parsed_data")
+    parsed_dir = folder_path.with_name(folder_path.name + PARSED_DATA_SUFFIX)
     generated = write_sample_csvs(all_files, str(parsed_dir), known_sample_ids,
                                   gene_sets)
-    manifest = folder_path.with_name(folder_path.name + "_parsed_files.txt")
+    manifest = folder_path.with_name(folder_path.name + PARSED_FILES_SUFFIX)
     write_text_atomically(manifest, "\n".join(generated) + "\n")
     write_provenance(
         provenance_path(manifest), stage="sample_manifest", outputs=[manifest],
@@ -773,10 +778,10 @@ def _clean_clustering_results(output_dir: Path) -> None:
     owned = [
         path for path in output_dir.iterdir()
         if path.name in {SAMPLE_PATHS_FILE, TREE_TOPOLOGY_FILE}
-        or _ITERATION_FILE_RE.fullmatch(path.name)
-        or path.name in {SAMPLE_PATHS_FILE + ".tmp",
-            TREE_TOPOLOGY_FILE + ".tmp"}
-        or re.fullmatch(r"iter[1-9][0-9]*\.txt\.tmp", path.name)
+        or SNAPSHOT_FILE_RE.match(path.name)
+        or path.name in {SAMPLE_PATHS_FILE + TEMPORARY_SUFFIX,
+            TREE_TOPOLOGY_FILE + TEMPORARY_SUFFIX}
+        or SNAPSHOT_FILE_RE.match(path.name.removesuffix(TEMPORARY_SUFFIX))
     ]
     manifest = output_dir / CLUSTERING_PROVENANCE_FILE
     invalidate_dependents(owned + [manifest], [output_dir, output_dir.parent])
@@ -817,7 +822,7 @@ def _validate_clustering_outputs(output_dir: Path) -> (
         int(match.group(1))
         for entry in output_dir.iterdir()
         if entry.is_file()
-        and (match := _ITERATION_FILE_RE.fullmatch(entry.name)) is not None
+        and (match := SNAPSHOT_FILE_RE.match(entry.name)) is not None
     }
     if actual_iterations != expected_iterations:
         missing = sorted(expected_iterations - actual_iterations)
@@ -906,7 +911,7 @@ def main() -> int:
 
     executable = build_program(cpp_source)
 
-    clustering_results_dir = Path("clustering_results")
+    clustering_results_dir = Path(RESULTS_DIR)
     _clean_clustering_results(clustering_results_dir)
 
     print(f"Running clustering executable: {executable}...", file=sys.stderr)

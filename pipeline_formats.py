@@ -31,6 +31,7 @@ from pipeline_io import (
     parse_decimal_float,
     read_csv_rows,
     read_utf8_lines,
+    snapshot_file,
     validate_identifier,
 )
 
@@ -400,7 +401,7 @@ def read_snapshots(directory: Path) -> tuple[list[str], np.ndarray]:
     topology = read_tree_topology(directory / TREE_TOPOLOGY_FILE, count)
     states = np.zeros((count, count), dtype=np.int32)
     for split in topology.splits:
-        name = f"iter{split.iteration}.txt"
+        name = snapshot_file(split.iteration)
         text = (directory / name).read_text(encoding="utf-8")
         line = text[:-1] if text.endswith("\n") else text
         if "\n" in line or not _SNAPSHOT_RE.match(line):

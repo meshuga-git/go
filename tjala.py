@@ -44,6 +44,7 @@ from pipeline_io import (
     MATRIX_GENES_FILE,
     MATRIX_SAMPLES_FILE,
     MATRIX_VALUES_FILE,
+    PREPARE_MARKER_FILE,
     SAMPLE_LINEAGES_FILE,
     TERM_VARIANCES_FILE,
     TJALA_OUTPUT_FILE,
@@ -586,7 +587,7 @@ def load_algorithm_data(
                 f"Missing required file: {file_names[name]}"
             )
 
-    if (Path(base_path) / ".compute_variances_prepare_in_progress").exists():
+    if (Path(base_path) / PREPARE_MARKER_FILE).exists():
         raise ValueError("Input preparation is incomplete; rerun prepare")
     verify_artifacts(Path(path) for path in file_paths.values())
     genes = read_identifiers(Path(file_paths["genes"]), label="gene")
