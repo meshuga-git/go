@@ -16,13 +16,20 @@
     "build_hierarchy": 0,
     "reconstruct_hierarchy": 0,
     "build_dendrogram": 0,
-    "compute_variances": 1
+    "compute_variances": 0,
+    "samples_by_cluster": 0,
+    "tjala": 0,
+    "samples_by_signature": 0
    },
    "artifacts": {
     "cannot_links.txt": "fa6331bf7275bf76d323aa7b64b3daa8b93aad5d91e694dd3e38a8c7db510c2a",
     "cannot_links.txt.provenance": "82f2c9112f8410c3df7f365188df688d49358e4bc712ab91941933288155f1cc",
+    "clustering_results/cluster_1.txt": "893f69c6d0b526b44c2404097ef7078ece848d26b365fc974b8aa02db7db5b55",
+    "clustering_results/cluster_1.txt.provenance": "9c17220cbba9b132f10b3fa9d324fa5e4a0709e16d61fe6fe08d67f14144b66a",
+    "clustering_results/cluster_1_hier_1.txt": "3fedbcb87b9d6b69e4c36a5234412108159fe6049c9d277d9f58c9beb45ecab5",
+    "clustering_results/cluster_1_hier_1.txt.provenance": "09c3debe83aca40b365a2f25802c99ee0c2e3f45d3e7a2e59ae2295213f5dab7",
     "clustering_results/clustering.provenance": "e18bf8b0dfb6855c27a5a7d85b528cc11ed3f6aeb6b0de3ba8cf1024feb52235",
-    "clustering_results/compute_variances_state.json": "01ea93d239a3832d9f7d38ebebda79128b138899c2912294a01f0a4369c7a063",
+    "clustering_results/compute_variances_state.json": "12f8d2bc72cca9ff40eebd8bab4711aba0cc7629ce28c1c916d30e541eb8f489",
     "clustering_results/filenames.txt": "06231db84105c4ed014b80e48445d857f66c9b52589204faffd227f42b73331f",
     "clustering_results/iter1.txt": "195a61cce9233f636c74847fcf79e530fe3e82a016b50636a8029caeedb174ef",
     "clustering_results/iter10.txt": "4db6e728c421102d57f0e99366b3ef2cac9972e5199cd88c6a0b93c7d0c1632e",
@@ -50,6 +57,12 @@
     "clustering_results/matrix_values.txt": "b56b2099764c4fb4b33f428e8593d6950cd244a9bb7bd8b8a42bb85ff2e21345",
     "clustering_results/prepared.provenance": "e01c672f66b2a6e535019504a8d6ea8a4c22d5b6a38bb7946060807c558fb14c",
     "clustering_results/sample_lineages.txt": "15fc41d8ed0b4df6f07f57c7d9def11faa59af3f71f92c36aa25ad8bcd78102f",
+    "clustering_results/signature_1.txt": "e7e0add93e4e47a6271a9a7cdacabd759b0fca577e4748411f2c8275f4d50263",
+    "clustering_results/signature_1.txt.provenance": "36263991b595608274c51993d5075cf20ba7898e93e708f75e2e4ea1b058d72d",
+    "clustering_results/term_variances.txt": "86d79b8acc4e6318de90ba14c2d2187555c889faebc41930f3c34ca33851ad52",
+    "clustering_results/term_variances.txt.provenance": "e2f73c1efb6e182bf0fb92ca077eacd1437d499470858338cd7c3af829312138",
+    "clustering_results/tjala_output.txt": "83ffae09f9cee09076538c5fb03bc1277cd2d736c8d9227f9f0c129b07548eac",
+    "clustering_results/tjala_output.txt.provenance": "78b3199bc7b1d84933bf3a0179ed2d0e2bb871bc079f256c2b74e6c0fc95a7cb",
     "clustering_results/total_data.csv": "3050989652306f08bda3f38555e3fb2132a121fc84e02370b347c41938a9c24f",
     "clustering_results/total_data.csv.provenance": "397fc81957b157f685e6dd0d826246bb821fe31484f58bb4be32d0bfde6d0c05",
     "clustering_results/tree_splits.txt": "dda2513ce57246bee5e673c2c0f3853db99ab3a1f8a2a956fc7121801b0aad63",
@@ -87,10 +100,6 @@
     "must_links.txt.provenance": "037b6414bf65d1d24f0a044f04a72c10a2d8cb7935c3187e93c72483dfbfb207",
     "no_links.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "no_links.txt.provenance": "493f5864c3ef32aa5c337d55e6f4530ac658a5ebeaba6ceb4f0ee8e75d29e52a"
-   },
-   "failure": {
-    "stage": "compute_variances",
-    "stderr": "Warning: 3 gene(s) absent from samples in /Users/runner/work/go/go/.golden-work/pipeline22/data/cancer_parsed_data are set to 0 there.\nWarning: 3 gene(s) absent from samples in /Users/runner/work/go/go/.golden-work/pipeline22/data/noncancer_parsed_data are set to 0 there.\nPrepared 406 genes x 22 samples in /Users/runner/work/go/go/.golden-work/pipeline22/clustering_results\nCompiling /Users/runner/work/go/go/.golden-work/pipeline22/clustering_results/compute_variances.cpp with /usr/bin/clang++\n/Users/runner/work/go/go/.golden-work/pipeline22/clustering_results/compute_variances.cpp:287:31: error: call to deleted function 'from_chars'\n  287 |     const auto [end, error] = std::from_chars(\n      |                               ^~~~~~~~~~~~~~~\n/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/__charconv/from_chars_integral.h:38:19: note: candidate function has been explicitly deleted\n   38 | from_chars_result from_chars(const char*, const char*, bool, int = 10) = delete;\n      |                   ^\n/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/__charconv/from_chars_integral.h:224:1: note: candidate template ignored: requirement 'is_integral<double>::value' was not satisfied [with _Tp = double]\n  224 | from_chars(const char* __first, const char* __last, _Tp& __value) {\n      | ^\n/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/__charconv/from_chars_integral.h:230:1: note: candidate function template not viable: requires 4 arguments, but 3 were provided\n  230 | from_chars(const char* __first, const char* __last, _Tp& __value, int __base) {\n      | ^          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n1 error generated.\nError: [compute_variances] Command '['/usr/bin/clang++', '-O2', '-std=c++20', '-o', '/Users/runner/work/go/go/.golden-work/pipeline22/clustering_results/.compute_variances_build_m902w6w8/compute_variances', '/Users/runner/work/go/go/.golden-work/pipeline22/clustering_results/compute_variances.cpp']' returned non-zero exit status 1.\n"
    }
   },
   "euclidean22": {
@@ -288,13 +297,13 @@
     "build_hierarchy": 0,
     "reconstruct_hierarchy": 0,
     "build_dendrogram": 0,
-    "compute_variances": 1
+    "compute_variances": 0
    },
    "artifacts": {
     "cannot_links.txt": "fa6331bf7275bf76d323aa7b64b3daa8b93aad5d91e694dd3e38a8c7db510c2a",
     "cannot_links.txt.provenance": "82f2c9112f8410c3df7f365188df688d49358e4bc712ab91941933288155f1cc",
     "clustering_results/clustering.provenance": "e18bf8b0dfb6855c27a5a7d85b528cc11ed3f6aeb6b0de3ba8cf1024feb52235",
-    "clustering_results/compute_variances_state.json": "e186c20a7739267d47079c858c6f568d6a7c24f4a4515a5ab3d9599626038a8f",
+    "clustering_results/compute_variances_state.json": "5e7bb4bc4bec2d1c27633745e382acd0e2a16ef19ce01dc97f7f59e906dd7a22",
     "clustering_results/filenames.txt": "06231db84105c4ed014b80e48445d857f66c9b52589204faffd227f42b73331f",
     "clustering_results/iter1.txt": "195a61cce9233f636c74847fcf79e530fe3e82a016b50636a8029caeedb174ef",
     "clustering_results/iter10.txt": "4db6e728c421102d57f0e99366b3ef2cac9972e5199cd88c6a0b93c7d0c1632e",
@@ -322,6 +331,8 @@
     "clustering_results/matrix_values.txt": "06f0eb998f80dc63b774353821fa8912489d88949a69084cd98870202f7f1302",
     "clustering_results/prepared.provenance": "d8bb3454d66b905a9663dca2c65167caa1527e0f6a24ddc6daf515158d45f9d1",
     "clustering_results/sample_lineages.txt": "15fc41d8ed0b4df6f07f57c7d9def11faa59af3f71f92c36aa25ad8bcd78102f",
+    "clustering_results/term_variances.txt": "e8ab2b5dc91a500e49796b13e7461e1bfc5ca23c175a6191202c687adf4cf15e",
+    "clustering_results/term_variances.txt.provenance": "0d757b851cbe7f338964580e1563e74a57edb8e27bd216cd3c1ae37fe00eaf3c",
     "clustering_results/total_data.csv": "3050989652306f08bda3f38555e3fb2132a121fc84e02370b347c41938a9c24f",
     "clustering_results/total_data.csv.provenance": "397fc81957b157f685e6dd0d826246bb821fe31484f58bb4be32d0bfde6d0c05",
     "clustering_results/tree_splits.txt": "dda2513ce57246bee5e673c2c0f3853db99ab3a1f8a2a956fc7121801b0aad63",
@@ -359,10 +370,6 @@
     "must_links.txt.provenance": "037b6414bf65d1d24f0a044f04a72c10a2d8cb7935c3187e93c72483dfbfb207",
     "no_links.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "no_links.txt.provenance": "493f5864c3ef32aa5c337d55e6f4530ac658a5ebeaba6ceb4f0ee8e75d29e52a"
-   },
-   "failure": {
-    "stage": "compute_variances",
-    "stderr": "Warning: 3 gene(s) absent from samples in /Users/runner/work/go/go/.golden-work/genes22/data/cancer_parsed_data are set to 0 there.\nWarning: 3 gene(s) absent from samples in /Users/runner/work/go/go/.golden-work/genes22/data/noncancer_parsed_data are set to 0 there.\nPrepared 102 genes x 22 samples in /Users/runner/work/go/go/.golden-work/genes22/clustering_results\nCompiling /Users/runner/work/go/go/.golden-work/genes22/clustering_results/compute_variances.cpp with /usr/bin/clang++\n/Users/runner/work/go/go/.golden-work/genes22/clustering_results/compute_variances.cpp:287:31: error: call to deleted function 'from_chars'\n  287 |     const auto [end, error] = std::from_chars(\n      |                               ^~~~~~~~~~~~~~~\n/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/__charconv/from_chars_integral.h:38:19: note: candidate function has been explicitly deleted\n   38 | from_chars_result from_chars(const char*, const char*, bool, int = 10) = delete;\n      |                   ^\n/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/__charconv/from_chars_integral.h:224:1: note: candidate template ignored: requirement 'is_integral<double>::value' was not satisfied [with _Tp = double]\n  224 | from_chars(const char* __first, const char* __last, _Tp& __value) {\n      | ^\n/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/__charconv/from_chars_integral.h:230:1: note: candidate function template not viable: requires 4 arguments, but 3 were provided\n  230 | from_chars(const char* __first, const char* __last, _Tp& __value, int __base) {\n      | ^          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n1 error generated.\nError: [compute_variances] Command '['/usr/bin/clang++', '-O2', '-std=c++20', '-o', '/Users/runner/work/go/go/.golden-work/genes22/clustering_results/.compute_variances_build_9eqjib1s/compute_variances', '/Users/runner/work/go/go/.golden-work/genes22/clustering_results/compute_variances.cpp']' returned non-zero exit status 1.\n"
    }
   },
   "tree1": {
@@ -461,13 +468,20 @@
     "build_hierarchy": 0,
     "reconstruct_hierarchy": 0,
     "build_dendrogram": 0,
-    "compute_variances": 1
+    "compute_variances": 0,
+    "samples_by_cluster": 0,
+    "tjala": 0,
+    "samples_by_signature": 0
    },
    "artifacts": {
     "cannot_links.txt": "fa6331bf7275bf76d323aa7b64b3daa8b93aad5d91e694dd3e38a8c7db510c2a",
     "cannot_links.txt.provenance": "82f2c9112f8410c3df7f365188df688d49358e4bc712ab91941933288155f1cc",
+    "clustering_results/cluster_1.txt": "073b10950009ceded01b3a23b724dae90075cfd5d12f5a3c336e31f29a6ac43e",
+    "clustering_results/cluster_1.txt.provenance": "dcd64cd24efdec11cceeee7a6671372384d9b9ad33c648b299a1bb55a8ba90fa",
+    "clustering_results/cluster_1_hier_1.txt": "78aa7aa9415b98a5a0eb659f1cbb89a34e996467ed2a815cd56a3e9653e4eeab",
+    "clustering_results/cluster_1_hier_1.txt.provenance": "ed189582a6d540b480b59a6b64c3582b31a9117e9aff5a5897a89bdf4ab0f544",
     "clustering_results/clustering.provenance": "4d90ec556d654372fc68b2f22b6cc31dac810183c20cae64e5ce8d2da6c621ab",
-    "clustering_results/compute_variances_state.json": "95d8a6f1168d0f683bc7bc3e1c0716dc883a77eb468bb7780ee9f51bf159dd82",
+    "clustering_results/compute_variances_state.json": "ca55c4db0ff6544a92ee093b06f0e41ba85597e7bbfa1c9d17f42bc59aa18031",
     "clustering_results/filenames.txt": "e2b093adb47d12ecffe9074b5df09eb488b42932cd6c84c43b1f538c7a0be795",
     "clustering_results/iter1.txt": "44f55d1448516a6db28fee3ae6ef6a3ec617687dbaaa5939dff06c62705ebdc0",
     "clustering_results/iter10.txt": "d14626e04f25e78c37dc7d8722bb128a4760728cc59996355d768583a095c778",
@@ -773,6 +787,12 @@
     "clustering_results/matrix_values.txt": "699bf2da4cf5a37baeed1f99d1427d5540e85e8defe16f59f624a16f2b2ae9be",
     "clustering_results/prepared.provenance": "b533f5dc780d9468a5d59f2d001a15b7f64650da61fe39fbb48b91b398d5ad92",
     "clustering_results/sample_lineages.txt": "bd5465172df9593d96353e3e2d3a0e22beeb84e34bc7d0a9888a27fef2ce8bb7",
+    "clustering_results/signature_1.txt": "e9fe36dbaa18016f9f39aed06f4e5c44bb40520f2a2039170a295cbabc14f06a",
+    "clustering_results/signature_1.txt.provenance": "af903aff28d177e9580a54ff5b2d6e1cc3e5ae34787514fa67450fd10ad91c61",
+    "clustering_results/term_variances.txt": "5d67e69434b4965d36bafaaed5059315e9a6164d39000ce2f1f2195d76725fdc",
+    "clustering_results/term_variances.txt.provenance": "0db9efb51181301c4eeaafe3a3c3eb1f16c71648a475b813a8db2e4e4901d096",
+    "clustering_results/tjala_output.txt": "274f53527204038b6686342efeddf8f5bdf88865935075d9e7fdc94c7fac5d8c",
+    "clustering_results/tjala_output.txt.provenance": "1a97d8cd3b736f0e8d1dc58277dc59558beaa0dc0cda09c46695c8f3fe57fa45",
     "clustering_results/total_data.csv": "3c1794ed428a8b744971265eb9147f3d2d222feade302d0ebfcf1cc9956d2773",
     "clustering_results/total_data.csv.provenance": "7a8dd4c4c8733ed3ab514861c3eda66b75c0cb2ffb068fbf00db82e72cf75b83",
     "clustering_results/tree_splits.txt": "d473f4d8765b87a2cae9ac15a8568ced62dcab3d1d3b93df4807b2018de83600",
@@ -1088,10 +1108,6 @@
     "must_links.txt.provenance": "037b6414bf65d1d24f0a044f04a72c10a2d8cb7935c3187e93c72483dfbfb207",
     "no_links.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "no_links.txt.provenance": "493f5864c3ef32aa5c337d55e6f4530ac658a5ebeaba6ceb4f0ee8e75d29e52a"
-   },
-   "failure": {
-    "stage": "compute_variances",
-    "stderr": "Warning: 3 gene(s) absent from samples in /Users/runner/work/go/go/.golden-work/timing300/data/cancer_parsed_data are set to 0 there.\nWarning: 3 gene(s) absent from samples in /Users/runner/work/go/go/.golden-work/timing300/data/noncancer_parsed_data are set to 0 there.\nPrepared 5006 genes x 300 samples in /Users/runner/work/go/go/.golden-work/timing300/clustering_results\nCompiling /Users/runner/work/go/go/.golden-work/timing300/clustering_results/compute_variances.cpp with /usr/bin/clang++\n/Users/runner/work/go/go/.golden-work/timing300/clustering_results/compute_variances.cpp:287:31: error: call to deleted function 'from_chars'\n  287 |     const auto [end, error] = std::from_chars(\n      |                               ^~~~~~~~~~~~~~~\n/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/__charconv/from_chars_integral.h:38:19: note: candidate function has been explicitly deleted\n   38 | from_chars_result from_chars(const char*, const char*, bool, int = 10) = delete;\n      |                   ^\n/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/__charconv/from_chars_integral.h:224:1: note: candidate template ignored: requirement 'is_integral<double>::value' was not satisfied [with _Tp = double]\n  224 | from_chars(const char* __first, const char* __last, _Tp& __value) {\n      | ^\n/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/__charconv/from_chars_integral.h:230:1: note: candidate function template not viable: requires 4 arguments, but 3 were provided\n  230 | from_chars(const char* __first, const char* __last, _Tp& __value, int __base) {\n      | ^          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n1 error generated.\nError: [compute_variances] Command '['/usr/bin/clang++', '-O2', '-std=c++20', '-o', '/Users/runner/work/go/go/.golden-work/timing300/clustering_results/.compute_variances_build_1fxbwxnm/compute_variances', '/Users/runner/work/go/go/.golden-work/timing300/clustering_results/compute_variances.cpp']' returned non-zero exit status 1.\n"
    }
   }
  },
